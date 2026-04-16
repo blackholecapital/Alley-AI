@@ -1,0 +1,13 @@
+# Cloudflare Worker local development variables
+# Copy this file to .dev.vars and fill in real values.
+# .dev.vars is gitignored and never committed.
+#
+# Ref: S5A.2 — Cloudflare Worker runtime patch
+
+# Runtime environment tag (development | staging | production)
+ENVIRONMENT=development
+
+# Add secrets and API keys below as the runtime grows.
+# SUPABASE_URL=
+# SUPABASE_ANON_KEY=
+# OPENAI_API_KEY=

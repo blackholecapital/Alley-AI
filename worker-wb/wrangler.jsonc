@@ -1,0 +1,31 @@
+{
+  // Cloudflare Worker configuration — worker-wb deployment root
+  // Ref: S5A.2 Cloudflare Worker runtime patch
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ali-ai-worker-wb",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Build — Wrangler bundles TypeScript natively; no separate build step needed.
+  // If a custom build becomes necessary, uncomment:
+  // "build": { "command": "npm run build" },
+
+  // Environment bindings are injected via .dev.vars (local) or
+  // the Cloudflare dashboard (production). See .dev.vars.example.
+
+  // KV / D1 / R2 / Queues can be added here when the runtime needs them.
+  // Placeholder sections below — uncomment and configure as needed:
+
+  // "kv_namespaces": [
+  //   { "binding": "CHASSIS_KV", "id": "<kv-namespace-id>" }
+  // ],
+
+  // "d1_databases": [
+  //   { "binding": "CHASSIS_DB", "database_name": "ali-ai-chassis", "database_id": "<d1-id>" }
+  // ],
+
+  "observability": {
+    "enabled": true
+  }
+}
