@@ -12,6 +12,7 @@ import type {
   TelegramEnv,
   TelegramUpdate,
 } from '../integrations/telegram/types';
+import { recordInbound, recordOutbound } from '../lib/session-store';
 
 const SECRET_HEADER = 'x-telegram-bot-api-secret-token';
 
@@ -59,12 +60,15 @@ export async function handleTelegramWebhook(
     return jsonResponse({ ok: true, handled: false, reason: 'no_message' });
   }
 
+  recordInbound(event);
+
   if (event.kind !== 'text' || !event.text) {
     return jsonResponse({ ok: true, handled: false, reason: `kind:${event.kind}`, event_id: event.id });
   }
 
   const token = env.TELEGRAM_BOT_TOKEN ?? '';
-  const send = await sendTelegramMessage(token, event.chat_id, buildTextReply(event), {
+  const replyText = buildTextReply(event);
+  const send = await sendTelegramMessage(token, event.chat_id, replyText, {
     replyToMessageId: event.message_id,
   });
 
@@ -74,6 +78,14 @@ export async function handleTelegramWebhook(
       502,
     );
   }
+
+  recordOutbound({
+    event_id: event.id,
+    chat_id: event.chat_id,
+    reply_to_message_id: event.message_id,
+    sent_message_id: send.message_id,
+    text: replyText,
+  });
 
   return jsonResponse({
     ok: true,

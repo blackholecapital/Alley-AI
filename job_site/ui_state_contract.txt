@@ -1,0 +1,165 @@
+UI STATE CONTRACT — EXEC-AI-STAGE2-003 | S3 | WORKER A
+=======================================================
+Scope: contract that Worker B and the operator UI consume to render the
+live text loop. Stage 2 golden path only.
+
+----------------------------------------------------------------
+1. ENDPOINT
+----------------------------------------------------------------
+method:       GET (HEAD allowed)
+path:         /session/latest
+query_params:
+   limit  (optional, integer 1..100, default 25)
+auth:         public (no Cloudflare Access gate on this route)
+cache:        Cache-Control: no-store
+content_type: application/json; charset=utf-8
+
+non_get_methods return HTTP 405.
+
+----------------------------------------------------------------
+2. RESPONSE SHAPE
+----------------------------------------------------------------
+Success (HTTP 200):
+
+{
+  "ok": true,
+  "session": {
+    "session_id":      "<uuid>",
+    "started_at":      "<ISO-8601>",
+    "last_event_at":   "<ISO-8601> | null"
+  },
+  "items": [
+    {
+      "id":          "<string>",
+      "direction":   "inbound" | "outbound",
+      "source":      "telegram",
+      "kind":        "text" | "voice" | "other",
+      "chat_id":     <number>,
+      "message_id":  <number | null>,
+      "user_id":     <number | null>,
+      "username":    "<string | null>",
+      "text":        "<string | null>",
+      "at":          "<ISO-8601>"
+    }
+  ],
+  "counts": {
+    "inbound":  <number>,
+    "outbound": <number>,
+    "total":    <number>
+  }
+}
+
+items:
+   - newest first (reverse chronological)
+   - at most `limit` entries
+   - may be empty if the session has no activity yet
+
+----------------------------------------------------------------
+3. FIELD SEMANTICS
+----------------------------------------------------------------
+session.session_id:
+   - stable for the lifetime of the Worker isolate that served this request
+   - changes on isolate cold-start or redeploy
+   - UI uses this to detect session rotation and re-render transcript
+
+session.started_at:
+   - ISO timestamp of isolate / session bootstrap
+
+session.last_event_at:
+   - ISO timestamp of the most recent recorded item
+   - null when items is empty
+
+items[].id:
+   - "in:telegram:<update_id>" for inbound items
+   - "out:telegram:<update_id>" for the outbound reply to that update
+   - safe to use as React key / list key
+
+items[].direction:
+   - "inbound"  = message received from user via Telegram
+   - "outbound" = assistant reply sent to user via Telegram
+
+items[].kind:
+   - "text"  = textual payload present in items[].text
+   - "voice" = Telegram voice note received (text is null in S2; transcription wires in S4)
+   - "other" = update type not mapped to text or voice
+
+items[].chat_id / message_id / user_id / username:
+   - telegram identifiers copied from inbound update
+   - outbound items carry the sent message_id when Telegram accepts the send
+   - user_id / username are null on outbound items
+
+items[].text:
+   - utf-8 string, may be truncated by the operator UI
+   - null for non-text kinds and for outbound send failures
+
+items[].at:
+   - ISO timestamp
+   - inbound: Worker receive time (not Telegram message.date)
+   - outbound: Worker send time immediately after successful sendMessage
+
+counts:
+   - running totals for the lifetime of this session
+   - counts.total = counts.inbound + counts.outbound
+
+----------------------------------------------------------------
+4. UI STATE MAPPING (for Worker B)
+----------------------------------------------------------------
+empty:
+   - ok:true and items.length === 0 and counts.total === 0
+   - UI shows "no activity yet" placeholder
+
+live:
+   - ok:true and counts.total > 0
+   - UI renders items as transcript, newest first, with direction styling
+
+loading:
+   - fetch in flight before first response
+   - UI shows "connecting…" or spinner
+
+error:
+   - network failure, non-200 response, or response.ok === false
+   - UI shows readable error state (not a dead empty pane)
+
+last-event marker:
+   - derived from session.last_event_at
+   - null => "no events yet"
+   - otherwise UI shows "last update <relative time>"
+
+session rotation:
+   - when session.session_id differs from the last observed id, the UI
+     resets transcript scroll and refreshes the full list
+
+----------------------------------------------------------------
+5. POLLING GUIDANCE
+----------------------------------------------------------------
+- Stage 2 uses short-interval polling (recommended 1.5s – 3s).
+- Response is cheap (bounded by limit) and `Cache-Control: no-store`
+  prevents edge caching.
+- Streaming / SSE / WebSocket are out of Stage 2 scope.
+
+----------------------------------------------------------------
+6. STORE SEMANTICS
+----------------------------------------------------------------
+backing_store:  in-isolate module-level ring buffer (src/lib/session-store.ts)
+capacity:       50 items; oldest items are dropped FIFO
+scope:          per Cloudflare Worker isolate
+persistence:    none; lost on isolate eviction or redeploy
+multi-isolate:  items written to one isolate are not visible to another
+promoted_to:    Durable Object / KV promotion is Stage 3+ territory, not in S3
+
+This is acceptable for the Stage 2 demo loop because a single live
+operator talking to a single bot will typically stay warm in the same
+isolate for the length of a demo. Operators must not rely on this as
+durable storage.
+
+----------------------------------------------------------------
+7. ERROR AND STATUS CODES
+----------------------------------------------------------------
+200  OK                    normal response (includes empty state)
+405  method not allowed    non-GET/HEAD request to /session/latest
+
+The endpoint itself does not return 500/502/4xx JSON bodies; failures
+upstream (e.g. Telegram send failure) appear in the transcript as an
+absent outbound item with the inbound item still present. Worker B
+should interpret "inbound without paired outbound after N seconds"
+as an operator-visible failure marker in the UI.
