@@ -6,8 +6,13 @@
 // path does NOT reach an external backend (no PROXY_BACKEND_URL fetch, no
 // Telegram Bot API call) — the reply text is synthesized in-worker and
 // recorded through recordOutbound so /session/latest closes the UI loop.
-// Every response carries a correlation_id and structured logs are emitted
-// at each boundary.
+//
+// Response contract: this route ALWAYS returns HTTP 200 with the body
+// {"ok": true} and content-type application/json to the caller (UI /
+// Telegram). Internal validation, parse, and dispatch failures are logged
+// but never surface as non-2xx responses — the caller must always see a
+// clean 200 so it never treats a handled update as a retriable failure.
+// Structured logs on every boundary preserve observability.
 // Ref: build-sheet-EXEC-AI-STAGE2-003 S2 + S3 + S4 + S5.
 
 import { parseTelegramUpdate } from '../integrations/telegram/inbound';
@@ -22,7 +27,6 @@ import { recordInbound, recordOutbound } from '../lib/session-store';
 import { getTranscriptionProvider } from '../providers/transcription';
 import type { TranscriptionEnv } from '../providers/transcription/provider';
 import { validateTelegramEnv, validateTranscriptionEnv } from '../lib/env';
-import { errorResponse, jsonResponse } from '../lib/errors';
 import type { Logger } from '../lib/logging';
 
 const SECRET_HEADER = 'x-telegram-bot-api-secret-token';
@@ -44,7 +48,7 @@ async function handleTextEvent(
   env: TelegramWebhookEnv,
   logger: Logger,
   replyText: string,
-): Promise<Response> {
+): Promise<void> {
   const token = env.TELEGRAM_BOT_TOKEN ?? '';
   logger.debug('telegram.send.start', { chat_id: event.chat_id, event_id: event.id });
 
@@ -59,12 +63,7 @@ async function handleTextEvent(
       status: send.status,
       reason: send.description,
     });
-    return errorResponse('upstream_error', {
-      message: 'telegram sendMessage failed',
-      detail: send.description,
-      correlationId: logger.correlationId,
-      extra: { event_id: event.id, stage: 'telegram_send', status: send.status },
-    });
+    return;
   }
 
   recordOutbound({
@@ -80,31 +79,17 @@ async function handleTextEvent(
     chat_id: event.chat_id,
     reply_message_id: send.message_id,
   });
-
-  return jsonResponse(
-    {
-      ok: true,
-      handled: true,
-      event_id: event.id,
-      reply_message_id: send.message_id,
-    },
-    { correlationId: logger.correlationId },
-  );
 }
 
 async function handleVoiceEvent(
   event: InternalEvent,
   env: TelegramWebhookEnv,
   logger: Logger,
-): Promise<Response> {
+): Promise<void> {
   const voice = event.raw.message?.voice ?? event.raw.edited_message?.voice;
   if (!voice) {
     logger.warn('telegram.voice.payload_missing', { event_id: event.id });
-    return errorResponse('bad_request', {
-      message: 'voice payload missing from update',
-      correlationId: logger.correlationId,
-      extra: { event_id: event.id },
-    });
+    return;
   }
 
   const token = env.TELEGRAM_BOT_TOKEN ?? '';
@@ -122,23 +107,13 @@ async function handleVoiceEvent(
       detail: fetched.detail,
       status: fetched.status,
     });
-    return errorResponse('upstream_error', {
-      message: 'telegram voice fetch failed',
-      detail: fetched.detail,
-      correlationId: logger.correlationId,
-      extra: { event_id: event.id, stage: 'voice_fetch', reason: fetched.reason },
-    });
+    return;
   }
 
   const transcriptionIssues = validateTranscriptionEnv(env);
   if (!transcriptionIssues.ok) {
     logger.error('env.transcription.invalid', { errors: transcriptionIssues.errors });
-    return errorResponse('config_error', {
-      message: 'transcription provider is not configured correctly',
-      detail: transcriptionIssues.errors.map((e) => `${e.key}: ${e.message}`),
-      correlationId: logger.correlationId,
-      extra: { event_id: event.id, stage: 'transcription_config' },
-    });
+    return;
   }
 
   const provider = getTranscriptionProvider(env);
@@ -163,17 +138,7 @@ async function handleVoiceEvent(
       reason: transcript.reason,
       retryable: transcript.retryable,
     });
-    return errorResponse('upstream_error', {
-      message: 'transcription failed',
-      detail: transcript.reason,
-      correlationId: logger.correlationId,
-      extra: {
-        event_id: event.id,
-        stage: 'transcription',
-        provider: transcript.provider,
-        retryable: transcript.retryable,
-      },
-    });
+    return;
   }
 
   logger.info('transcription.ok', {
@@ -189,40 +154,30 @@ async function handleVoiceEvent(
   };
   recordInbound(transcribedEvent);
 
-  return handleTextEvent(transcribedEvent, env, logger, buildVoiceReply(transcript.text));
+  await handleTextEvent(transcribedEvent, env, logger, buildVoiceReply(transcript.text));
 }
 
-export async function handleTelegramWebhook(
+async function processTelegramUpdate(
   request: Request,
   env: TelegramWebhookEnv,
   logger: Logger,
-): Promise<Response> {
+): Promise<void> {
   if (request.method !== 'POST') {
     logger.warn('telegram.webhook.method_not_allowed', { method: request.method });
-    return errorResponse('method_not_allowed', {
-      message: 'POST required',
-      correlationId: logger.correlationId,
-    });
+    return;
   }
 
   const telegramIssues = validateTelegramEnv(env);
   if (!telegramIssues.ok) {
     logger.error('env.telegram.invalid', { errors: telegramIssues.errors });
-    return errorResponse('config_error', {
-      message: 'telegram environment is not configured',
-      detail: telegramIssues.errors.map((e) => `${e.key}: ${e.message}`),
-      correlationId: logger.correlationId,
-    });
+    return;
   }
 
   const expectedSecret = env.TELEGRAM_WEBHOOK_SECRET!;
   const providedSecret = request.headers.get(SECRET_HEADER);
   if (providedSecret !== expectedSecret) {
     logger.warn('telegram.webhook.secret_mismatch');
-    return errorResponse('forbidden', {
-      message: 'webhook secret header invalid',
-      correlationId: logger.correlationId,
-    });
+    return;
   }
 
   let update: TelegramUpdate;
@@ -230,27 +185,18 @@ export async function handleTelegramWebhook(
     update = (await request.json()) as TelegramUpdate;
   } catch {
     logger.warn('telegram.webhook.bad_json');
-    return errorResponse('bad_request', {
-      message: 'request body was not valid json',
-      correlationId: logger.correlationId,
-    });
+    return;
   }
 
   if (typeof update?.update_id !== 'number') {
     logger.warn('telegram.webhook.bad_update_shape');
-    return errorResponse('bad_request', {
-      message: 'telegram update shape invalid',
-      correlationId: logger.correlationId,
-    });
+    return;
   }
 
   const event = parseTelegramUpdate(update, new Date());
   if (!event) {
     logger.info('telegram.webhook.no_message', { update_id: update.update_id });
-    return jsonResponse(
-      { ok: true, handled: false, reason: 'no_message' },
-      { correlationId: logger.correlationId },
-    );
+    return;
   }
 
   recordInbound(event);
@@ -262,16 +208,33 @@ export async function handleTelegramWebhook(
   });
 
   if (event.kind === 'text' && event.text) {
-    return handleTextEvent(event, env, logger, buildTextReply(event.text));
+    await handleTextEvent(event, env, logger, buildTextReply(event.text));
+    return;
   }
 
   if (event.kind === 'voice') {
-    return handleVoiceEvent(event, env, logger);
+    await handleVoiceEvent(event, env, logger);
+    return;
   }
 
   logger.info('telegram.webhook.unhandled_kind', { event_id: event.id, kind: event.kind });
-  return jsonResponse(
-    { ok: true, handled: false, reason: `kind:${event.kind}`, event_id: event.id },
-    { correlationId: logger.correlationId },
-  );
+}
+
+export async function handleTelegramWebhook(
+  request: Request,
+  env: TelegramWebhookEnv,
+  logger: Logger,
+): Promise<Response> {
+  try {
+    await processTelegramUpdate(request, env, logger);
+  } catch (err) {
+    logger.error('telegram.webhook.unhandled_error', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
