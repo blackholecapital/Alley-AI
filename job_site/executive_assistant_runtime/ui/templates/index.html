@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Executive Assistant — Operator UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+
+  <!-- ── Status bar ─────────────────────────────────────────────────── -->
+  <header class="status-bar" id="status-bar">
+    <span class="status-title">Executive Assistant</span>
+    <span class="status-divider">|</span>
+    <span id="status-demo-badge" class="badge {% if demo_mode %}badge-demo{% else %}badge-live{% endif %}">
+      {% if demo_mode %}DEMO MODE{% else %}LIVE{% endif %}
+    </span>
+    <span class="status-divider">|</span>
+    <span class="status-item">Core: <span id="status-core" class="status-value">checking…</span></span>
+    <span class="status-divider">|</span>
+    <span class="status-item">Voice: <span id="status-voice" class="status-value">checking…</span></span>
+    <span class="status-divider">|</span>
+    <span class="status-item">Boot: <span class="status-value">{{ boot_time }}</span></span>
+    <span class="status-divider">|</span>
+    <span class="status-item">Session: <span id="status-session" class="status-value monospace">—</span></span>
+  </header>
+
+  <!-- ── Main panels ────────────────────────────────────────────────── -->
+  <main class="panels">
+
+    <!-- Transcript pane -->
+    <section class="pane" id="pane-transcript">
+      <div class="pane-header">
+        <span class="pane-label">Transcript</span>
+        <button class="pane-action" onclick="clearPane('transcript-log')">Clear</button>
+      </div>
+      <div class="pane-body" id="transcript-log">
+        <p class="pane-placeholder">User input will appear here.</p>
+      </div>
+    </section>
+
+    <!-- Response pane -->
+    <section class="pane" id="pane-response">
+      <div class="pane-header">
+        <span class="pane-label">Assistant Response</span>
+        <button class="pane-action" onclick="clearPane('response-log')">Clear</button>
+      </div>
+      <div class="pane-body" id="response-log">
+        <p class="pane-placeholder">Assistant responses will appear here.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Input / Talk control ───────────────────────────────────────── -->
+  <footer class="input-bar">
+    <div class="input-row">
+
+      <!-- Talk button -->
+      <button
+        id="talk-btn"
+        class="talk-btn {% if demo_mode %}talk-btn-demo{% endif %}"
+        title="{% if demo_mode %}Voice disabled in demo mode — use text input{% else %}Push to talk{% endif %}"
+        {% if demo_mode %}disabled{% endif %}
+        onclick="toggleTalk()"
+      >
+        <span id="talk-icon">🎙</span>
+        <span id="talk-label">{% if demo_mode %}Voice (off){% else %}Talk{% endif %}</span>
+      </button>
+
+      <!-- Text input -->
+      <input
+        id="text-input"
+        type="text"
+        class="text-input"
+        placeholder="Type a message and press Enter…"
+        autocomplete="off"
+        onkeydown="if(event.key==='Enter') sendMessage()"
+      />
+
+      <!-- Send button -->
+      <button class="send-btn" onclick="sendMessage()">Send</button>
+
+    </div>
+
+    <!-- Sending indicator -->
+    <div id="thinking-bar" class="thinking-bar hidden">
+      <span class="thinking-dot"></span>
+      <span class="thinking-dot"></span>
+      <span class="thinking-dot"></span>
+      <span class="thinking-text">Thinking…</span>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
