@@ -1,9 +1,13 @@
 // Telegram webhook route handler.
 // Validates env and the Telegram secret header, parses the Update into a
 // normalized InternalEvent, records it in the shared session store, and
-// produces one outbound Telegram reply. Voice notes are promoted into the
-// text pipeline via the configured transcription provider. Every response
-// carries a correlation_id and structured logs are emitted at each boundary.
+// produces one outbound reply in-worker. Voice notes are promoted into the
+// text pipeline via the configured transcription provider. The outbound
+// path does NOT reach an external backend (no PROXY_BACKEND_URL fetch, no
+// Telegram Bot API call) — the reply text is synthesized in-worker and
+// recorded through recordOutbound so /session/latest closes the UI loop.
+// Every response carries a correlation_id and structured logs are emitted
+// at each boundary.
 // Ref: build-sheet-EXEC-AI-STAGE2-003 S2 + S3 + S4 + S5.
 
 import { parseTelegramUpdate } from '../integrations/telegram/inbound';
