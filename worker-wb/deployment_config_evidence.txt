@@ -1,0 +1,53 @@
+DEPLOYMENT CONFIG EVIDENCE — EXEC-AI-RAPID-002 | S5B.2
+======================================================
+Generated: 2026-04-16
+Branch: claude/cloudflare-worker-runtime-patch-HUAbq
+
+1. ROOT DIRECTORY CONFIRMATION
+   Deployment root: /worker-wb  (relative to repo)
+   Absolute path:   /home/user/ALI-ai/worker-wb
+
+2. WRANGLER CONFIG LOCATION
+   File:  /worker-wb/wrangler.jsonc
+   No wrangler config exists at repo root — verified.
+   No package.json exists at repo root — verified.
+   Wrangler will auto-discover wrangler.jsonc in cwd when invoked from /worker-wb.
+
+3. ENTRYPOINT RESOLUTION
+   wrangler.jsonc "main" field: "src/index.ts"
+   Resolves to: /worker-wb/src/index.ts — file exists, contains `export default` fetch handler.
+
+4. PACKAGE MANIFEST
+   /worker-wb/package.json declares:
+     "dev":    "wrangler dev"
+     "deploy": "wrangler deploy"
+   Both execute wrangler from the /worker-wb directory via npm scripts.
+
+5. SHELL SCRIPTS — EXECUTION CONTEXT
+   /worker-wb/scripts/dev_worker.sh:
+     - Computes WORKER_ROOT as parent of scripts/ → resolves to /worker-wb
+     - Runs `cd "$WORKER_ROOT"` before invoking `npx wrangler dev`
+   /worker-wb/scripts/deploy_worker.sh:
+     - Same WORKER_ROOT resolution → /worker-wb
+     - Runs `cd "$WORKER_ROOT"` before invoking `npx wrangler deploy`
+   Both scripts are executable (chmod +x).
+
+6. NO REPO-ROOT INTERFERENCE
+   Checked for competing config at /home/user/ALI-ai/:
+     wrangler.toml   — NOT FOUND
+     wrangler.jsonc   — NOT FOUND
+     wrangler.json    — NOT FOUND
+     package.json     — NOT FOUND
+   Conclusion: no repo-root config can override /worker-wb Wrangler context.
+
+7. INVOCATION PATHS (all valid)
+   a) cd /worker-wb && npm run dev
+   b) cd /worker-wb && npx wrangler dev
+   c) ./worker-wb/scripts/dev_worker.sh   (auto-cds into worker-wb)
+   d) cd /worker-wb && npm run deploy
+   e) ./worker-wb/scripts/deploy_worker.sh (auto-cds into worker-wb)
+
+8. VERDICT
+   Root directory = /worker-wb: CONFIRMED
+   Wrangler execution context = /worker-wb: CONFIRMED
+   No repo-root config conflict: CONFIRMED
