@@ -647,3 +647,174 @@ class TestPostConfirmationReset:
             r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
             _run(cal.handle_create(r2))
         assert provider.seed_count() == initial + 2
+
+
+# ---------------------------------------------------------------------------
+# 10. Extended state-reset, no-dup-write, and session-isolation tests
+# ---------------------------------------------------------------------------
+
+class TestStateResetExtended:
+    """Deeper post-confirmation state-reset checks."""
+
+    def test_pending_dict_empty_after_full_cycle(self, cal, provider):
+        text = "book a meeting tomorrow at 3pm"
+        sid = "sess-dict-empty"
+        key = (sid, text)
+        t1 = _make_turn(text, session_id=sid)
+        r1 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t1)
+        _run(cal.handle_create(r1))
+        assert key in cal._pending_creates
+        t2 = _make_turn(text, session_id=sid)
+        r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
+        _run(cal.handle_create(r2))
+        assert key not in cal._pending_creates
+
+    def test_three_consecutive_cycles_each_gate(self, cal, provider):
+        """Three create-confirm cycles on the same session: each must re-gate."""
+        sid = "sess-3-cycles"
+        text = "book a meeting tomorrow at 3pm"
+        initial = provider.seed_count()
+        for i in range(3):
+            t1 = _make_turn(text, session_id=sid)
+            r1 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t1)
+            res1 = _run(cal.handle_create(r1))
+            assert res1.requires_confirmation is True, f"cycle {i}: Phase 1 must gate"
+            t2 = _make_turn(text, session_id=sid)
+            r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
+            res2 = _run(cal.handle_create(r2))
+            assert res2.success is True, f"cycle {i}: Phase 2 must succeed"
+        assert provider.seed_count() == initial + 3
+
+    def test_phase2_pops_key_atomically(self, cal, provider):
+        """After Phase 2, the same key cannot be replayed for a second write."""
+        text = "book a meeting tomorrow at 3pm"
+        sid = "sess-atomic"
+        t1 = _make_turn(text, session_id=sid)
+        r1 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t1)
+        _run(cal.handle_create(r1))  # Phase 1
+        t2 = _make_turn(text, session_id=sid)
+        r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
+        _run(cal.handle_create(r2))  # Phase 2 — write
+        # Immediate replay must NOT write again — enters Phase 1 instead
+        initial = provider.seed_count()
+        t3 = _make_turn(text, session_id=sid)
+        r3 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t3)
+        res3 = _run(cal.handle_create(r3))
+        assert res3.requires_confirmation is True
+        assert provider.seed_count() == initial  # no extra write
+
+
+class TestNoDuplicateWrites:
+    """Ensure exactly one provider.create_event per confirmed cycle."""
+
+    def test_second_call_same_key_is_phase2(self, cal, provider):
+        """Second call with same (session, text) enters Phase 2 — exactly one write."""
+        text = "book a meeting tomorrow at 3pm"
+        sid = "sess-dup-p1"
+        initial = provider.seed_count()
+        # Call 1: Phase 1 (stores pending)
+        t1 = _make_turn(text, session_id=sid)
+        r1 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t1)
+        res1 = _run(cal.handle_create(r1))
+        assert res1.requires_confirmation is True
+        # Call 2: key exists → Phase 2 (pops pending, writes)
+        t2 = _make_turn(text, session_id=sid)
+        r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
+        res2 = _run(cal.handle_create(r2))
+        assert res2.requires_confirmation is False
+        assert provider.seed_count() == initial + 1
+        # Call 3: key gone → Phase 1 again (no extra write)
+        t3 = _make_turn(text, session_id=sid)
+        r3 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t3)
+        res3 = _run(cal.handle_create(r3))
+        assert res3.requires_confirmation is True
+        assert provider.seed_count() == initial + 1
+
+    def test_different_texts_same_session_separate_writes(self, cal, provider):
+        """Two different create requests in same session = two independent gates."""
+        sid = "sess-diff-text"
+        initial = provider.seed_count()
+        texts = [
+            "book a meeting tomorrow at 3pm",
+            "schedule a call tomorrow at 10am",
+        ]
+        for text in texts:
+            t1 = _make_turn(text, session_id=sid)
+            r1 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t1)
+            _run(cal.handle_create(r1))  # Phase 1
+            t2 = _make_turn(text, session_id=sid)
+            r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
+            _run(cal.handle_create(r2))  # Phase 2
+        assert provider.seed_count() == initial + 2
+
+    def test_write_count_matches_confirmed_count(self, cal, provider):
+        """Mix of cancelled and confirmed creates: writes = confirmed only."""
+        initial = provider.seed_count()
+        # Cancelled (Phase 1 only)
+        t = _make_turn("book a meeting tomorrow at 9am", session_id="sess-mix")
+        r = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t)
+        _run(cal.handle_create(r))
+        # Confirmed
+        text2 = "book a call tomorrow at 2pm"
+        t1 = _make_turn(text2, session_id="sess-mix")
+        r1 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t1)
+        _run(cal.handle_create(r1))
+        t2 = _make_turn(text2, session_id="sess-mix")
+        r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
+        _run(cal.handle_create(r2))
+        assert provider.seed_count() == initial + 1  # only the confirmed one
+
+
+class TestSessionIsolationExtended:
+    """Cross-session isolation: actions in one session must not leak to another."""
+
+    def test_session_a_pending_invisible_to_session_b(self, cal):
+        text = "book a meeting tomorrow at 3pm"
+        sid_a, sid_b = "sess-iso-ext-a", "sess-iso-ext-b"
+        # Session A: Phase 1
+        t = _make_turn(text, session_id=sid_a)
+        r = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t)
+        _run(cal.handle_create(r))
+        # Session B: same text, Phase 1 — must get its own gate
+        t2 = _make_turn(text, session_id=sid_b)
+        r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
+        res = _run(cal.handle_create(r2))
+        assert res.requires_confirmation is True
+        # Both pending entries exist independently
+        assert (sid_a, text) in cal._pending_creates
+        assert (sid_b, text) in cal._pending_creates
+
+    def test_confirm_session_a_does_not_write_session_b(self, cal, provider):
+        text = "book a meeting tomorrow at 3pm"
+        sid_a, sid_b = "sess-cross-a", "sess-cross-b"
+        initial = provider.seed_count()
+        # Both sessions: Phase 1
+        for sid in (sid_a, sid_b):
+            t = _make_turn(text, session_id=sid)
+            r = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t)
+            _run(cal.handle_create(r))
+        # Confirm session A only
+        t2 = _make_turn(text, session_id=sid_a)
+        r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
+        _run(cal.handle_create(r2))
+        assert provider.seed_count() == initial + 1
+        # Session B still pending, not written
+        assert (sid_b, text) in cal._pending_creates
+
+    def test_cancel_session_a_leaves_session_b_intact(self, cal, provider):
+        text = "book a meeting tomorrow at 3pm"
+        sid_a, sid_b = "sess-cancel-a", "sess-cancel-b"
+        initial = provider.seed_count()
+        # Both: Phase 1
+        for sid in (sid_a, sid_b):
+            t = _make_turn(text, session_id=sid)
+            r = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t)
+            _run(cal.handle_create(r))
+        # "Cancel" A by never calling Phase 2 — confirm B
+        t2 = _make_turn(text, session_id=sid_b)
+        r2 = ActionRequest(action_type=ActionType.CALENDAR_CREATE, turn=t2)
+        res = _run(cal.handle_create(r2))
+        assert res.success is True
+        assert provider.seed_count() == initial + 1
+        # A's stale entry still exists (harmless)
+        assert (sid_a, text) in cal._pending_creates
