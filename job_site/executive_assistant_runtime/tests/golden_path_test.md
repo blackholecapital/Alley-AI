@@ -1,12 +1,13 @@
 # Golden Path Test Script — EXEC-AI-RAPID-002
-**Stage:** S6 — Screenshot Checkpoint and UI Tighten Pass  
-**Version:** S6.1 (updated from S2.1-initial)  
+**Stage:** S8 — Calendar Action Layer  
+**Version:** S8.1 (updated from S6.1)  
 **Owner:** Worker B  
 **Mode:** Human-executed known-good script (demo mode safe)
 
 **Change log:**
 - S2.1-initial: core path only (Steps 1–7)
 - S6.1: added UI boot section (Steps 8–14), screenshot compare steps throughout, Telegram channel smoke test (Step 15), updated sign-off table
+- S8.1: added Part E calendar action layer (Steps 17–22), updated sign-off table, updated Appendix A with confirmation gate responses
 
 ---
 
@@ -347,6 +348,134 @@ pytest tests/test_telegram_demo_mode.py -v
 
 ---
 
+## ── PART E: CALENDAR ACTION LAYER ──────────────────────────────────────
+
+## Step 17 — Calendar Lookup (No Confirmation Required)
+
+**Action:** Send `What is on my calendar today?` via the assistant core:
+```python
+result = core.process("What is on my calendar today?", session_id="cal-001", channel="test")
+```
+
+**Expected response (demo mode):**
+```
+Today you have: 10:00 AM — Team standup (30 min), 2:00 PM — Product review (1 hr).
+```
+
+**Pass condition:**
+- `result["action_taken"]` is `"calendar_lookup"`
+- Response contains at least one event from seed data
+- `result["error"]` is `None`
+- No confirmation prompt in response (lookup never gates)
+- Interaction log has in/out entries for this turn
+
+---
+
+## Step 18 — Calendar Create Triggers Confirmation Gate
+
+**Action:** Send a create intent:
+```python
+result = core.process("Book a meeting with Alex tomorrow at 3pm", session_id="cal-001", channel="test")
+```
+
+**Expected response (demo mode):**
+```
+[Demo] I would create: "Meeting with Alex" tomorrow at 3:00 PM. Shall I confirm? (yes / no)
+```
+
+**Pass condition:**
+- `result["action_taken"]` is `"calendar_create"`
+- Response contains a confirmation prompt — must include "yes" and "no" (case-insensitive)
+- **No calendar event is written** (demo mode guard; also: confirmation not yet given)
+- `result.get("needs_confirm")` is `True` if present
+- `result["error"]` is `None`
+
+---
+
+## Step 19 — Confirmation YES Path (Event Created)
+
+**Action:** In the same session, send `yes` immediately after Step 18:
+```python
+# Session must carry pending_action from Step 18
+result_confirm = core.process("yes", session_id="cal-001", channel="test")
+```
+
+**Expected response (demo mode):**
+```
+[Demo] Event created: "Meeting with Alex" on <tomorrow's date> at 3:00 PM.
+```
+
+**Pass condition:**
+- Response confirms event creation
+- `result_confirm["action_taken"]` is `"calendar_create"` or `"calendar_confirm"`
+- In **live mode** (not required for demo pass): one event created in calendar provider
+- In **demo mode**: response is from seed/stub; no API call made
+- Pending action is cleared from session after this turn
+- Interaction log records the confirmation turn
+
+---
+
+## Step 20 — Confirmation NO Path (Cancelled)
+
+**Action:** Start a fresh create intent, then send `no`:
+```python
+result_create = core.process("Schedule a call with Sara on Friday", session_id="cal-002", channel="test")
+# Verify confirmation prompt appears
+result_cancel = core.process("no", session_id="cal-002", channel="test")
+```
+
+**Expected response after `no`:**
+```
+Cancelled. No event was created.
+```
+
+**Pass condition:**
+- Response clearly states the action was cancelled
+- `result_cancel["error"]` is `None`
+- No calendar write occurs (demo mode; also: explicitly cancelled)
+- Pending action is cleared from session after cancellation
+
+---
+
+## Step 21 — Confirmation Gate via Operator UI
+
+**Action:** With the Flask UI running, send a create intent through the browser:
+
+1. Type `Book a meeting with the board next Monday` → press Enter
+2. Read the confirmation prompt in the response pane
+3. Type `yes` → press Enter
+
+**Pass condition (demo mode):**
+- Step 1 response contains a confirmation prompt (action tag: `calendar_create`)
+- Step 3 response confirms event creation (action tag: `calendar_create` or `calendar_confirm`)
+- No raw error visible in response pane
+- Interaction log entries show `channel: "ui"` with both turns
+
+Then repeat steps 1–2 but send `no` in step 3:
+
+**Pass condition (cancel path):**
+- Response states cancellation
+- No event written
+
+---
+
+## Step 22 — Confirmation Gate via Telegram (pytest only)
+
+*Full live Telegram test requires a bot token. Run the automated suite instead.*
+
+**Action:**
+```bash
+pytest tests/test_calendar_confirmation.py -v
+```
+
+**Pass condition:**
+- All tests pass (0 failures)
+- `TestConfirmationGateRequired`, `TestConfirmYesPath`, `TestConfirmNoPath` all PASS
+- `TestCrossChannelGate` PASS — confirms gate logic is channel-agnostic
+- No test skipped unexpectedly
+
+---
+
 ## ── PART D: END-TO-END LOG CHECK ────────────────────────────────────────
 
 ## Step 16 — Full Log Audit
@@ -393,8 +522,14 @@ print("Channels seen:", channels)
 | 14 — UI Reboot | UI | ☐ PASS / ☐ FAIL | | — | |
 | 15 — Telegram pytest | Telegram | ☐ PASS / ☐ FAIL | | — | |
 | 16 — Full Log Audit | Log | ☐ PASS / ☐ FAIL | | — | |
+| 17 — Cal Lookup | Calendar | ☐ PASS / ☐ FAIL | | — | |
+| 18 — Cal Create Gate | Calendar | ☐ PASS / ☐ FAIL | | — | |
+| 19 — Confirm YES | Calendar | ☐ PASS / ☐ FAIL | | — | |
+| 20 — Confirm NO | Calendar | ☐ PASS / ☐ FAIL | | — | |
+| 21 — UI Cal Confirm | Calendar/UI | ☐ PASS / ☐ FAIL | | — | |
+| 22 — Cal pytest | Calendar/pytest | ☐ PASS / ☐ FAIL | | — | |
 
-**Overall result:** ☐ PASS — proceed to S7 / ☐ FAIL — return to S6 tighten pass
+**Overall result:** ☐ PASS — proceed to S9 / ☐ FAIL — return to S8
 
 **Open defects (FAIL items):**
 
@@ -404,15 +539,20 @@ print("Channels seen:", channels)
 
 ---
 
-## Appendix A — Known-Good Seed Responses (Demo Mode, locked at S6)
+## Appendix A — Known-Good Seed Responses (Demo Mode, updated S8.1)
 
-| Input pattern | Expected `action_taken` | Expected response snippet |
-|---|---|---|
-| `hello` / `hi` | `greeting` | "Hello! I'm your executive assistant" |
-| `calendar` / `schedule` / `what's on` | `calendar_lookup` | seeded event list |
-| `book` / `schedule a meeting` | `calendar_create` | "[Demo] … Shall I confirm? (yes/no)" |
-| `status` / `health` / `ping` | `status_check` | "System status: OK · Demo mode: ON" |
-| `[unrecognised]` | `fallback` | "I'm not sure how to help" |
+| Input pattern | Expected `action_taken` | Confirmation required? | Expected response snippet |
+|---|---|---|---|
+| `hello` / `hi` | `greeting` | No | "Hello! I'm your executive assistant" |
+| `calendar` / `schedule` / `what's on` | `calendar_lookup` | No | seeded event list |
+| `book` / `schedule a` / `create event` | `calendar_create` | **YES — gate fires** | "[Demo] … Shall I confirm? (yes / no)" |
+| `update` / `reschedule` | `calendar_update` | **YES — gate fires** | "[Demo] … Shall I update this? (yes / no)" |
+| `yes` (after gate prompt) | `calendar_confirm` | — | "[Demo] Event created: …" |
+| `no` (after gate prompt) | `calendar_cancel` | — | "Cancelled. No event was created." |
+| `status` / `health` / `ping` | `status_check` | No | "System status: OK · Demo mode: ON" |
+| `[unrecognised]` | `fallback` | No | "I'm not sure how to help" |
+
+**Confirmation gate rule:** Any `calendar_create` or `calendar_update` intent must produce a confirmation prompt on the first turn. The event is only written (or stubbed in demo mode) after the user explicitly replies `yes`. A `no` reply or session reset clears the pending action without writing.
 
 ---
 
