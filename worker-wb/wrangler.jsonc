@@ -2,7 +2,7 @@
   // Cloudflare Worker configuration — worker-wb deployment root
   // Ref: S5A.2, S5B.1 — Cloudflare Worker runtime patch + binding placeholders
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "ali-ai-worker-wb",
+  "name": "ali-ai",
   "main": "src/index.ts",
   "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat"],
