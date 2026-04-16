@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Interaction log (runtime data, not source)
+data/interaction_log.jsonl
+
+# Screenshots (binary, large — attach to handoff separately)
+docs/screenshots/
+
+# Environment secrets
+.env
+config/.env
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
