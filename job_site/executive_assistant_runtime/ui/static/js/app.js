@@ -118,7 +118,8 @@ function makeEntry(role, text, actionTaken, isError) {
   if (actionTaken && role === "assistant") {
     const tag = document.createElement("span");
     tag.className = "entry-action-tag";
-    tag.textContent = actionTaken;
+    // S6 patch: replace underscores with spaces for readability
+    tag.textContent = actionTaken.replace(/_/g, " ");
     meta.appendChild(tag);
   }
 

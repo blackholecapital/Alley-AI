@@ -167,6 +167,12 @@ html, body {
   border-left-color: var(--demo-color) !important;
 }
 
+/* S6 patch: .entry-error was referenced in app.js but undefined in CSS */
+.entry-error {
+  border-left-color: var(--danger) !important;
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface2));
+}
+
 .entry-meta {
   font-size: 10px;
   color: var(--text-dim);

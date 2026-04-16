@@ -34,6 +34,8 @@ PORT: int = int(os.environ.get("UI_PORT", "5050"))
 DEBUG: bool = os.environ.get("UI_DEBUG", "false").lower() == "true"
 
 _BOOT_TIME: str = datetime.now(timezone.utc).isoformat()
+# S6 patch: compact display string for the status bar (avoids overflow on small screens)
+_BOOT_TIME_SHORT: str = datetime.now(timezone.utc).strftime("%-d %b %H:%MZ")
 
 # ---------------------------------------------------------------------------
 # Flask app
@@ -57,8 +59,12 @@ def _load_core():
         if str(_root) not in sys.path:
             sys.path.insert(0, str(_root))
         from executive_assistant_runtime.core.assistant_core import AssistantCore
-        return AssistantCore()
-    except ImportError:
+        candidate = AssistantCore()
+        # Verify the real core exposes .process(); fall back to stub if not
+        if not callable(getattr(candidate, "process", None)):
+            raise AttributeError("AssistantCore missing process()")
+        return candidate
+    except Exception:
         return _StubCore()
 
 
@@ -73,7 +79,12 @@ class _StubCore:
         channel: str = "ui",
         user_id: str | None = None,
     ) -> dict[str, Any]:
-        from executive_assistant_runtime.core.interaction_log import log_turn
+        # Attempt to log; silently skip if interaction_log not yet wired (S2.2)
+        try:
+            from executive_assistant_runtime.core.interaction_log import log_turn as _log
+            _log_fn = _log
+        except Exception:
+            _log_fn = None
 
         msg = message.lower().strip()
         if not msg:
@@ -102,14 +113,18 @@ class _StubCore:
                 "I'm not sure how to help with that. Try: calendar, book a meeting, or /help."
             )
 
-        log_turn(
-            channel=channel,
-            session_id=session_id,
-            user_message=message,
-            assistant_response=response,
-            user_id=user_id,
-            action_taken=action,
-        )
+        if _log_fn is not None:
+            try:
+                _log_fn(
+                    channel=channel,
+                    session_id=session_id,
+                    user_message=message,
+                    assistant_response=response,
+                    user_id=user_id,
+                    action_taken=action,
+                )
+            except Exception:
+                pass
 
         return {
             "response": response,
@@ -132,7 +147,7 @@ def index():
     return render_template(
         "index.html",
         demo_mode=DEMO_MODE,
-        boot_time=_BOOT_TIME[:19] + "Z",
+        boot_time=_BOOT_TIME_SHORT,
     )
 
 
