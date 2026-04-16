@@ -2,7 +2,13 @@
 // Holds recent inbound and outbound message items plus a rolling session
 // identity so the operator UI can render the live text loop without any
 // external state. Bounded ring buffer; isolate-local only.
-// Ref: build-sheet-EXEC-AI-STAGE2-003 S3.
+//
+// Cloudflare Workers disallow non-deterministic operations (crypto.randomUUID,
+// new Date(), Date.now(), timers, network I/O) at module top-level. All such
+// calls in this module happen lazily on the first request that needs them,
+// inside explicitly invoked functions — never at global scope.
+//
+// Ref: build-sheet-EXEC-AI-STAGE2-003 S3 + S5 (global-scope I/O fix).
 
 import type { InternalEvent } from '../integrations/telegram/types';
 
@@ -37,12 +43,30 @@ const MAX_ITEMS = 50;
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
 
-const sessionId: string = crypto.randomUUID();
-const startedAt: string = new Date().toISOString();
+// Deterministic module state only. Any value that requires crypto.randomUUID
+// or the wall clock is populated on first access, never at load time.
+let sessionId: string | null = null;
+let startedAt: string | null = null;
 const items: SessionItem[] = [];
 const counts = { inbound: 0, outbound: 0, total: 0 };
 
+interface SessionIdentity {
+  sessionId: string;
+  startedAt: string;
+}
+
+function ensureSessionIdentity(): SessionIdentity {
+  if (sessionId === null || startedAt === null) {
+    sessionId = crypto.randomUUID();
+    startedAt = new Date().toISOString();
+  }
+  return { sessionId, startedAt };
+}
+
 function push(item: SessionItem): void {
+  // Touch identity on first write so session.started_at reflects the first
+  // observed event rather than module load.
+  ensureSessionIdentity();
   items.push(item);
   if (items.length > MAX_ITEMS) {
     items.splice(0, items.length - MAX_ITEMS);
@@ -95,13 +119,14 @@ export function recordOutbound(record: OutboundRecord): SessionItem {
 }
 
 export function getLatest(limit: number = DEFAULT_LIMIT): SessionSnapshot {
+  const identity = ensureSessionIdentity();
   const effective = Math.min(Math.max(1, Math.trunc(limit)), MAX_LIMIT);
   const tail = items.slice(-effective).reverse();
   const lastEventAt = items.length > 0 ? items[items.length - 1]!.at : null;
   return {
     session: {
-      session_id: sessionId,
-      started_at: startedAt,
+      session_id: identity.sessionId,
+      started_at: identity.startedAt,
       last_event_at: lastEventAt,
     },
     items: tail,
@@ -115,4 +140,6 @@ export function __resetForTests(): void {
   counts.inbound = 0;
   counts.outbound = 0;
   counts.total = 0;
+  sessionId = null;
+  startedAt = null;
 }
