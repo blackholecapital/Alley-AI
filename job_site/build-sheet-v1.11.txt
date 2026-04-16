@@ -1,0 +1,128 @@
+BUILD SHEET — LEAN PROTOTYPE V1.11
+
+job:
+  job_id:
+  job_name:
+  objective:
+  requested_outcome:
+  factory_approved_chassis: attached for reference
+  job_site_root: /job_site
+  reference_materials:
+    -
+  active_run_docs:
+    - /job_site/factory-manual-v1.11.txt
+    - /job_site/foreman-manual-v1.11.txt
+    - /job_site/worker-execution-manual-v1.1.txt
+    - /job_site/build-sheet-[job_id].txt
+  operator_notes:
+
+run_control:
+  control_interface: Factory Control Interface
+  execution_foreman: "Foreman A the Blueprint Foreman"
+  checksum_foreman: "Foreman B the Systems Foreman"
+  mode: single | parallel
+  final_validator: Factory Control Interface
+
+output_rules:
+  stage_activity_log: /job_site/stage_activity_log.txt
+  final_tps_report: /job_site/TPS_REPORT.txt
+  mandatory_foreman_tag_block:
+    - job_id
+    - foreman
+    - current_stage
+    - current_pass
+    - next_stage
+    - next_owner
+    - passes_remaining
+    - status
+    - current_action
+  mandatory_foreman_execution_block:
+    - artifacts
+    - checkpoint_result
+    - handoff_instruction
+    - issue_if_patch_or_error
+  mandatory_worker_output:
+    - "[PROJECT | WORKER | STAGE | RESULT]"
+    - status
+    - artifacts
+    - summary
+    - issues_if_patch
+
+stages:
+  - stage_id:
+    stage_name:
+    owner: "Foreman A the Blueprint Foreman" | "Foreman B the Systems Foreman" | Factory Control Interface
+    goal:
+    inputs:
+      -
+    accepted_validation_evidence:
+      - attached_file_system
+      - exact_repo_url
+      - attached_archive
+      - foreman_handoff_text
+      - worker_handoff_text
+    worker_orders:
+      worker_a:
+        assigned: yes | no
+        task:
+        expected_artifacts:
+          -
+        required_references:
+          - /job_site/factory-manual-v1.11.txt
+          - /job_site/worker-execution-manual-v1.1.txt
+          - /job_site/build-sheet-[job_id].txt
+        repo_mirror_required: yes | no
+        commit_required: yes | no
+        push_required: yes | no
+      worker_b:
+        assigned: yes | no
+        task:
+        expected_artifacts:
+          -
+        required_references:
+          - /job_site/factory-manual-v1.11.txt
+          - /job_site/worker-execution-manual-v1.1.txt
+          - /job_site/build-sheet-[job_id].txt
+        repo_mirror_required: yes | no
+        commit_required: yes | no
+        push_required: yes | no
+    required_stage_artifacts:
+      -
+    required_log_entries:
+      -
+    checkpoint:
+      checkpoint_id:
+      pass_condition:
+      patch_condition:
+    handoff:
+      on_pass:
+        next_stage:
+        next_owner:
+      on_patch:
+        return_stage:
+        return_owner:
+      on_error:
+        return_to: Factory Control Interface
+
+final_validation:
+  accepted_validation_evidence:
+    - attached_file_system
+    - exact_repo_url
+    - attached_archive
+    - foreman_handoff_text
+    - worker_handoff_text
+  required_inputs:
+    -
+  validation_checks:
+    -
+  outputs:
+    - completion_status
+    - /job_site/TPS_REPORT.txt
+
+completion:
+  success_condition:
+    - all declared stages completed
+    - all required artifacts present
+    - declared stage activity log present
+    - declared TPS report present
+  closeout_owner: Factory Control Interface
