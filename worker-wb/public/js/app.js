@@ -21,7 +21,7 @@
 
 const HEALTH_ENDPOINT = "/health";
 const SESSION_ENDPOINT = "/session/latest";
-const SEND_ENDPOINT = "/telegram/webhook";
+const SEND_ENDPOINT = "/ui/send";
 const POLL_MS = 5000;
 
 const DOM = {
@@ -86,7 +86,9 @@ function renderSnapshot(data) {
     setText(DOM.session(), String(data.session.session_id).slice(0, 8) + "…");
   }
 
-  const items = Array.isArray(data.items) ? data.items : [];
+  const raw = Array.isArray(data.items) ? data.items : [];
+  // /session/latest returns newest-first; reverse for chronological rendering.
+  const items = raw.slice().reverse();
   const newestId = items.length > 0 ? items[items.length - 1].id : null;
   if (newestId === lastRenderedId) return;
 
