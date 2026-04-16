@@ -39,7 +39,7 @@ class ErrorCode(str, Enum):
 class AssistantError(Exception):
     """Base error for all assistant runtime failures."""
     code: ErrorCode
-    message: str
+    message: str = ""
     detail: Optional[str] = None
     recoverable: bool = True
 
