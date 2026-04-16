@@ -1,0 +1,141 @@
+DEMO ENV MATRIX — EXEC-AI-STAGE2-003 | S5 | WORKER A
+=====================================================
+Scope: environment variables required or recognized by the worker-wb
+Cloudflare Worker for the Stage 2 demo loop (Telegram text + UI + voice).
+Lists canonical key names, severity if missing, and how to set each.
+
+----------------------------------------------------------------
+1. RUNTIME PATHS AND THEIR ENV DEPENDENCIES
+----------------------------------------------------------------
+/telegram/webhook  — Telegram inbound + outbound text and voice
+   requires:   TELEGRAM_BOT_TOKEN        (secret)
+               TELEGRAM_WEBHOOK_SECRET   (secret)
+   optional:   TRANSCRIPTION_PROVIDER    (var)   "deepgram" | "noop"
+               DEEPGRAM_API_KEY          (secret, when provider=deepgram)
+               DEEPGRAM_MODEL            (var, default "nova-2")
+
+/session/latest    — Operator UI state surface
+   requires:   (none)
+   optional:   (none)
+
+404 / unmatched    — catch-all
+   requires:   (none)
+
+----------------------------------------------------------------
+2. KEYS
+----------------------------------------------------------------
+KEY                        KIND     REQUIRED FOR                SEVERITY IF MISSING
+-------------------------  -------  --------------------------  ------------------------
+TELEGRAM_BOT_TOKEN         secret   outbound sendMessage,       error
+                                    voice media download
+TELEGRAM_WEBHOOK_SECRET    secret   inbound webhook verify      error
+TRANSCRIPTION_PROVIDER     var      provider selection          none when unset; defaults
+                                                                 to noop (warn) or deepgram
+                                                                 when DEEPGRAM_API_KEY is set
+DEEPGRAM_API_KEY           secret   voice transcription path    error when provider=deepgram;
+                                                                 warn when provider unset
+                                                                 (voice path falls through
+                                                                 to noop = readable failure)
+DEEPGRAM_MODEL             var      deepgram tuning             none; defaults to "nova-2"
+ENVIRONMENT                var      log enrichment              none; defaults to "unknown"
+WORKER_VERSION             var      log enrichment              none; defaults to "unknown"
+LOG_LEVEL                  var      log threshold               none; defaults to "info"
+                                                                 (values: debug | info |
+                                                                 warn | error)
+
+----------------------------------------------------------------
+3. WHERE TO SET EACH
+----------------------------------------------------------------
+a) Secrets (NEVER commit to wrangler.jsonc)
+
+   production:
+     cd worker-wb
+     wrangler secret put TELEGRAM_BOT_TOKEN
+     wrangler secret put TELEGRAM_WEBHOOK_SECRET
+     wrangler secret put DEEPGRAM_API_KEY     # only if voice transcription is live
+
+   local dev:
+     /worker-wb/.dev.vars  (gitignored; do not commit)
+       TELEGRAM_BOT_TOKEN=<token>
+       TELEGRAM_WEBHOOK_SECRET=<secret>
+       DEEPGRAM_API_KEY=<key>
+
+b) Plain vars (safe in wrangler.jsonc)
+
+   Edit /worker-wb/wrangler.jsonc -> "vars" block.
+   Current vars block:
+     ENVIRONMENT       = "development"
+     WORKER_VERSION    = "0.1.0"
+     LOG_LEVEL         = "info"
+     PROXY_BACKEND_URL = "http://localhost:5000"   (not consumed in S2)
+   Add as needed:
+     TRANSCRIPTION_PROVIDER = "deepgram"
+     DEEPGRAM_MODEL         = "nova-2"
+
+----------------------------------------------------------------
+4. VALIDATION BEHAVIOR
+----------------------------------------------------------------
+src/lib/env.ts exposes validators; the webhook route calls them per-request
+and returns explicit error responses instead of silent failures.
+
+validateTelegramEnv(env)
+   - TELEGRAM_BOT_TOKEN missing       -> error   -> 500 config_error on /telegram/webhook
+   - TELEGRAM_WEBHOOK_SECRET missing  -> error   -> 500 config_error on /telegram/webhook
+
+validateTranscriptionEnv(env)
+   - TRANSCRIPTION_PROVIDER=deepgram + DEEPGRAM_API_KEY missing
+                                       -> error   -> 500 config_error on voice path only
+   - TRANSCRIPTION_PROVIDER unset + DEEPGRAM_API_KEY unset
+                                       -> warn    -> voice path logs warn and uses noop
+                                                      adapter (returns readable failure)
+   - TRANSCRIPTION_PROVIDER is unknown
+                                       -> error   -> 500 config_error on voice path only
+
+Text-only round trip (no voice) remains functional when transcription env is
+unset; only the voice path degrades.
+
+----------------------------------------------------------------
+5. DEMO CAPABILITY MATRIX
+----------------------------------------------------------------
+CAPABILITY                        MINIMUM ENV REQUIRED
+--------------------------------  --------------------------------------------
+Telegram text round trip          TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
+UI session transcript at          (none — always available)
+  /session/latest
+Telegram voice -> transcript      TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET,
+  -> text pipeline                DEEPGRAM_API_KEY (+ optional
+                                  TRANSCRIPTION_PROVIDER=deepgram)
+Voice visible safe failure        TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
+  (no transcription configured)   (voice arrives, records inbound, returns
+                                  upstream_error with reason to the caller and
+                                  leaves an inbound item with text=null so the
+                                  UI can show an unresolved voice)
+
+----------------------------------------------------------------
+6. OBSERVABILITY
+----------------------------------------------------------------
+wrangler.jsonc has "observability.enabled": true. All logs emitted through
+src/lib/logging.ts are captured by Cloudflare Workers observability. Each line
+is JSON with at minimum:
+   ts, level, event, correlation_id, env, version, method, path
+
+Correlation IDs are taken from request headers in priority order:
+   cf-ray -> x-correlation-id -> x-request-id
+otherwise generated via crypto.randomUUID().
+
+Every response carries the same correlation_id both in the body (under
+"correlation_id") and as an `x-correlation-id` response header so operators
+can match UI failures to log lines without guessing.
+
+----------------------------------------------------------------
+7. OPERATOR CHECKLIST BEFORE DEMO
+----------------------------------------------------------------
+[ ] wrangler whoami succeeds
+[ ] wrangler secret put TELEGRAM_BOT_TOKEN        (prod)
+[ ] wrangler secret put TELEGRAM_WEBHOOK_SECRET   (prod)
+[ ] (optional) wrangler secret put DEEPGRAM_API_KEY
+[ ] wrangler.jsonc vars block reviewed (ENVIRONMENT, LOG_LEVEL, etc.)
+[ ] cd worker-wb && npm run deploy
+[ ] Telegram setWebhook points to the deployed route with secret_token set
+    to the exact TELEGRAM_WEBHOOK_SECRET value
+[ ] Operator UI can reach /session/latest publicly (no Access gate)
