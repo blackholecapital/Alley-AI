@@ -1,0 +1,2 @@
+# adapter-policy
+AUTHORITY: canonical

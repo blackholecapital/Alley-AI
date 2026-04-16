@@ -1,0 +1,2 @@
+# InstallStamp.contract
+AUTHORITY: canonical

@@ -1,0 +1,2 @@
+# Manifest.contract
+AUTHORITY: canonical

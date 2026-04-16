@@ -1,0 +1,2 @@
+# route.schema
+AUTHORITY: canonical

@@ -1,0 +1,2 @@
+# Touchpoint.contract
+AUTHORITY: canonical

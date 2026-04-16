@@ -1,0 +1,2 @@
+# manifest.schema
+AUTHORITY: canonical

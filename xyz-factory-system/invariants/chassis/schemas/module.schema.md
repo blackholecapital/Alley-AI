@@ -1,0 +1,2 @@
+# module.schema
+AUTHORITY: canonical

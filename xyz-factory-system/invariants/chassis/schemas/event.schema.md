@@ -1,0 +1,2 @@
+# event.schema
+AUTHORITY: canonical

@@ -1,0 +1,2 @@
+# trigger.schema
+AUTHORITY: canonical

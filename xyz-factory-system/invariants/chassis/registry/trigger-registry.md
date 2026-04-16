@@ -1,0 +1,2 @@
+# trigger-registry
+AUTHORITY: canonical

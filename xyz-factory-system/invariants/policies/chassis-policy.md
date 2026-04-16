@@ -1,0 +1,2 @@
+# chassis-policy
+AUTHORITY: canonical

@@ -1,0 +1,2 @@
+# route-registry
+AUTHORITY: canonical

@@ -1,0 +1,2 @@
+# module-registry
+AUTHORITY: canonical

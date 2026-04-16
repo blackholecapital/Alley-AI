@@ -1,0 +1,2 @@
+# touchpoint.schema
+AUTHORITY: canonical

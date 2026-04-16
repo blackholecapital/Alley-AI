@@ -1,0 +1,2 @@
+# Module.contract
+AUTHORITY: canonical

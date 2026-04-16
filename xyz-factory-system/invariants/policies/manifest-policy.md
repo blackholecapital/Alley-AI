@@ -1,0 +1,2 @@
+# manifest-policy
+AUTHORITY: canonical

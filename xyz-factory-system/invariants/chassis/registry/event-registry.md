@@ -1,0 +1,2 @@
+# event-registry
+AUTHORITY: canonical

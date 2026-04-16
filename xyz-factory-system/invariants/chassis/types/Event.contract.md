@@ -1,0 +1,2 @@
+# Event.contract
+AUTHORITY: canonical

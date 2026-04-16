@@ -1,0 +1,2 @@
+# Trigger.contract
+AUTHORITY: canonical
