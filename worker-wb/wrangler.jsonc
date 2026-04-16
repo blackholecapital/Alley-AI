@@ -7,6 +7,13 @@
   "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat"],
 
+  // ── Public testing route ──────────────────────────────────────────
+  // workers_dev = true exposes <name>.<account>.workers.dev which is
+  // reachable without Cloudflare Access gates. Use this URL for direct
+  // runtime testing when custom-domain routes are behind Zero Trust.
+  "workers_dev": true,
+  "preview_urls": true,
+
   // Build — Wrangler bundles TypeScript natively; no separate build step needed.
   // If a custom build becomes necessary, uncomment:
   // "build": { "command": "npm run build" },
@@ -17,6 +24,16 @@
   //   "assets": { "directory": "./public" }
   // and create the directory with at least an index.html before boot.
   // See: job_site/executive_assistant_runtime/docs/assets_plan.md
+
+  // ── Cloudflare Access / Zero Trust ────────────────────────────────
+  // If the Worker's custom-domain route is behind a Cloudflare Access
+  // Application, direct curl/fetch will redirect to the Access login.
+  // Options to unblock runtime testing:
+  //   1. Use the *.workers.dev URL (not gated by Access)
+  //   2. Create a "Bypass" policy for /health and /api/* paths
+  //      in Zero Trust → Access → Applications
+  //   3. Create a Service Token (Zero Trust → Access → Service Auth)
+  //      and pass CF-Access-Client-Id + CF-Access-Client-Secret headers
 
   // ── vars: plain-text runtime configuration ────────────────────────
   // These are NOT secrets. Secrets go in .dev.vars (local) or
