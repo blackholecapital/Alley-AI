@@ -1,0 +1,245 @@
+================================================================================
+EVIDENCE CALENDAR MAP — EXEC-AI-RAPID-002 | S8.9 | WORKER A
+================================================================================
+Generated: 2026-04-16
+Scope: Verifiable evidence mapping for calendar layer artifacts and behavior.
+
+================================================================================
+1. FILE EXISTENCE AND PATHS
+================================================================================
+
+All three required files exist on disk and are importable:
+
+  [CONFIRMED] /job_site/executive_assistant_runtime/actions/calendar_actions.py
+    - 624 lines
+    - Classes: CalendarActions
+    - Public methods: handle_list(), handle_availability(), handle_create()
+    - Helpers: extract_time_window(), parse_create_request()
+    - Registration: register_calendar_handlers(router, provider)
+    - Factory: create_calendar_actions(demo_mode, provider, slot_duration_minutes)
+
+  [CONFIRMED] /job_site/executive_assistant_runtime/actions/calendar_provider.py
+    - 478 lines
+    - ABC: CalendarProvider (list_events, check_availability, create_event)
+    - Implementations: DemoCalendarProvider (seed-backed), CalComProvider (stub)
+    - Data contracts: CalendarEvent, TimeSlot, CreateEventRequest
+    - Factory: create_provider(backend)
+
+  [CONFIRMED] /job_site/executive_assistant_runtime/tests/test_calendar_confirmation.py
+    - 484 lines
+    - 47 tests across 8 test classes
+    - Covers: lookup no-gate, confirmation gate, YES path, NO path,
+      session isolation, gate reset, cross-channel gate, demo mode guard
+
+Supporting files also confirmed present:
+
+  [CONFIRMED] /job_site/executive_assistant_runtime/tests/test_calendar_actions.py
+    - 821 lines
+    - 77 tests across 15 test classes
+    - Covers: time-window extraction, handle_list (today/tomorrow/week/empty/error),
+      handle_availability (today/tomorrow/error/formatting), demo mode guard,
+      parse_create_request, create Phase 1, create Phase 2, cancel path,
+      post-confirmation reset, state-reset extended, no-dup writes,
+      session isolation extended
+
+  [CONFIRMED] /job_site/executive_assistant_runtime/core/action_router.py
+    - ActionType enum: CALENDAR_LIST, CALENDAR_AVAILABILITY, CALENDAR_CREATE
+    - classify_intent(): keyword-based routing to calendar action types
+    - ActionRouter.route(): dispatches TurnContext -> ActionResult
+    - ActionRequest / ActionResult contracts with requires_confirmation field
+
+================================================================================
+2. BEHAVIOR PROOF
+================================================================================
+
+--- 2a. LIST EVENTS PATH EXECUTES ---
+
+  Source: calendar_actions.py:392-426  CalendarActions.handle_list()
+  Route:  ActionType.CALENDAR_LIST -> handle_list(req)
+  Flow:
+    1. Extracts time window from req.turn.raw_text via extract_time_window()
+    2. Calls provider.list_events(user_id, from_dt, to_dt)
+    3. Formats via _format_events() and returns ActionResult(success=True)
+  Test evidence (test_calendar_actions.py):
+    - TestHandleListToday: 6 tests — returns success, correct action_type,
+      reply contains schedule header, payload has event_count + window bounds,
+      seed events returned
+    - TestHandleListTomorrow: 3 tests — success, event data, seed events exist
+    - TestHandleListWeek: 3 tests — success, includes multi-day events
+    - TestHandleListEmpty: 1 test — no-events message
+    - TestHandleListProviderError: 1 test — graceful failure
+
+--- 2b. AVAILABILITY PATH EXECUTES ---
+
+  Source: calendar_actions.py:432-472  CalendarActions.handle_availability()
+  Route:  ActionType.CALENDAR_AVAILABILITY -> handle_availability(req)
+  Flow:
+    1. Extracts time window from text
+    2. Calls provider.check_availability(user_id, from_dt, to_dt, slot_duration)
+    3. Filters to free slots, formats via _format_availability()
+  Test evidence (test_calendar_actions.py):
+    - TestHandleAvailabilityToday: 6 tests — success, action_type, slot counts,
+      free <= total, slot_duration in payload, busy slots from seed
+    - TestHandleAvailabilityTomorrow: 3 tests — success, free slots, reply text
+    - TestHandleAvailabilityProviderError: 1 test — graceful failure
+    - TestHandleAvailabilityFormatting: 2 tests — caps at 5 slots, suggests booking
+
+--- 2c. CREATE EVENT REQUIRES CONFIRMATION (Phase 1 + Phase 2) ---
+
+  Source: calendar_actions.py:478-579  CalendarActions.handle_create()
+  Route:  ActionType.CALENDAR_CREATE -> handle_create(req)
+
+  Phase 1 (first call — parse + gate):
+    - Parses NL text via parse_create_request()
+    - Stores CreateEventRequest in _pending_creates[(session_id, raw_text)]
+    - Returns ActionResult(requires_confirmation=True, confirmation_prompt=...)
+    - provider.create_event() is NEVER called
+  Phase 1 test evidence (test_calendar_actions.py::TestCreatePhase1):
+    - test_requires_confirmation_true: asserts requires_confirmation=True
+    - test_no_provider_write: asserts seed_count unchanged
+    - test_pending_creates_stored: asserts (sid, text) in _pending_creates
+    - test_prompt_contains_yes_no: asserts "yes" and "no" in prompt
+    - + 7 more tests (action_type, success, prompt content, payload fields)
+
+  Phase 2 (confirmed replay — write executes):
+    - Same (session_id, raw_text) key found in _pending_creates
+    - Pops the stored CreateEventRequest
+    - Calls provider.create_event() — the ONLY write path
+    - Returns ActionResult(success=True, requires_confirmation=False)
+  Phase 2 test evidence (test_calendar_actions.py::TestCreatePhase2):
+    - test_phase2_success: asserts success=True
+    - test_phase2_no_confirmation_needed: asserts requires_confirmation=False
+    - test_phase2_event_written_to_provider: asserts seed_count == initial + 1
+    - test_phase2_clears_pending: asserts key removed from _pending_creates
+    - test_phase2_provider_error: asserts graceful failure on write error
+    - + 3 more tests (reply text, event_id, title)
+
+  Confirmation gate contract (test_calendar_confirmation.py):
+    - TestConfirmationGateRequired: 7 tests — gate fires on create & update,
+      prompt has yes/no, provider NOT called before confirmation
+    - TestConfirmYesPath: 7 tests — provider called after confirm, response
+      confirms creation, pending action cleared
+    - TestCrossChannelGate: 12 parametrized tests — gate fires identically on
+      telegram, ui, voice, test channels
+
+--- 2d. CANCEL PATH PREVENTS WRITE ---
+
+  Source: calendar_actions.py:25-32 (docstring) + AssistantCore._confirmation_path
+  Mechanism:
+    When user replies "no", AssistantCore._confirmation_path(confirmed=False)
+    clears pending_action from the session and returns a cancellation message.
+    handle_create() is NEVER called again — so provider.create_event() is
+    never invoked.  The stale _pending_creates entry is harmlessly overwritten
+    on the next create request from that session.
+
+  Test evidence (test_calendar_actions.py::TestCancelPathNoWrite):
+    - test_phase1_only_no_write: Phase 1 only, seed_count unchanged
+    - test_pending_entry_exists_after_phase1: stale entry present but harmless
+    - test_new_request_overwrites_stale_pending: new create overwrites old
+    - test_cancel_then_new_create_works: cancel + new create goes through Phase 2
+
+  Test evidence (test_calendar_confirmation.py::TestConfirmNoPath):
+    - test_no_does_not_call_provider: provider.create_calls == [] after cancel
+    - test_no_response_mentions_cancellation: reply says "cancelled"
+    - test_no_clears_pending_action: pending_action removed from session
+    - test_cancel_with_no_pending_is_safe: cancel with nothing pending is safe
+
+================================================================================
+3. REPO TREE — CALENDAR LAYER FILES
+================================================================================
+
+job_site/executive_assistant_runtime/
+  actions/
+    __init__.py
+    calendar_actions.py          <-- CalendarActions (handle_list, handle_availability, handle_create)
+    calendar_provider.py         <-- CalendarProvider ABC, DemoCalendarProvider, CalComProvider stub
+  core/
+    action_router.py             <-- ActionType enum, ActionRouter, classify_intent
+    assistant_core.py            <-- Confirmation gate integration (_confirmation_path)
+    dialog_manager.py            <-- TurnContext, DialogState, Channel
+    error_models.py              <-- ErrorCode, ActionRoutingError
+    interaction_log.py           <-- Global interaction log
+  tests/
+    test_calendar_actions.py     <-- 77 tests: list, availability, create Phase 1+2, cancel, reset
+    test_calendar_confirmation.py<-- 47 tests: gate contract, YES/NO, session isolation, cross-channel
+
+================================================================================
+4. TEST EXECUTION OUTPUT
+================================================================================
+
+--- test_calendar_confirmation.py ---
+  Platform: linux, Python 3.11.15, pytest-9.0.3
+  Collected: 47 items
+  Result: 47 passed in 0.29s
+
+  Test classes:
+    TestLookupNoGate              6/6  PASSED
+    TestConfirmationGateRequired  7/7  PASSED
+    TestConfirmYesPath            7/7  PASSED
+    TestConfirmNoPath             6/6  PASSED
+    TestSessionIsolation          3/3  PASSED
+    TestGateResetAfterResolve     2/2  PASSED
+    TestCrossChannelGate         12/12 PASSED  (parametrized: telegram, ui, voice, test)
+    TestDemoModeGuard             4/4  PASSED
+
+--- test_calendar_actions.py ---
+  Platform: linux, Python 3.11.15, pytest-9.0.3
+  Collected: 77 items
+  Result: 77 passed in 0.48s
+
+  Test classes:
+    TestExtractTimeWindow          7/7  PASSED
+    TestHandleListToday            6/6  PASSED
+    TestHandleListTomorrow         3/3  PASSED
+    TestHandleListWeek             3/3  PASSED
+    TestHandleListEmpty            1/1  PASSED
+    TestHandleListProviderError    1/1  PASSED
+    TestHandleAvailabilityToday    6/6  PASSED
+    TestHandleAvailabilityTomorrow 3/3  PASSED
+    TestHandleAvailabilityProvErr  1/1  PASSED
+    TestHandleAvailabilityFmt      2/2  PASSED
+    TestDemoModeGuard              3/3  PASSED
+    TestParseCreateRequest         7/7  PASSED
+    TestCreatePhase1              10/10 PASSED
+    TestCreatePhase2               8/8  PASSED
+    TestCancelPathNoWrite          4/4  PASSED
+    TestPostConfirmationReset      3/3  PASSED
+    TestStateResetExtended         3/3  PASSED
+    TestNoDuplicateWrites          3/3  PASSED
+    TestSessionIsolationExtended   3/3  PASSED
+
+  COMBINED: 124 passed, 0 failed, 0 errors
+
+================================================================================
+5. FUNCTION + ROUTING MAP
+================================================================================
+
+  classify_intent("show my calendar") -> CALENDAR_LIST
+  classify_intent("am I free today")  -> CALENDAR_AVAILABILITY
+  classify_intent("book a meeting")   -> CALENDAR_CREATE
+
+  ActionRouter.route(turn)
+    -> classify_intent(turn) -> ActionType
+    -> _handlers[ActionType](ActionRequest) -> ActionResult
+
+  register_calendar_handlers(router, provider)
+    -> router.register_handler(CALENDAR_LIST, cal.handle_list)
+    -> router.register_handler(CALENDAR_AVAILABILITY, cal.handle_availability)
+    -> router.register_handler(CALENDAR_CREATE, cal.handle_create)
+
+================================================================================
+6. REQUIRED REFERENCES VERIFIED
+================================================================================
+
+  [CONFIRMED] /job_site/build-sheet-EXEC-AI-RAPID-002.txt
+    - S8 (Calendar Action Layer) and S9 (Calendar Checksum) stages reference
+      calendar_actions.py, calendar_provider.py, test_calendar_confirmation.py
+    - CP-S9 pass condition: "evidence confirms list availability or events
+      plus create-after-confirmation behavior through at least one active interface"
+
+  [CONFIRMED] /job_site/executive_assistant_runtime/tests/test_calendar_confirmation.py
+    - 47 tests, all passing, covering the full confirmation gate contract
+
+================================================================================
+END OF EVIDENCE MAP
+================================================================================
