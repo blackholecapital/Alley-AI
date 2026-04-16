@@ -1,0 +1,129 @@
+EVIDENCE MAP — EXEC-AI-RAPID-002 | S3 Telegram Wrapper Validation
+Generated: 2026-04-16
+Branch: claude/assistant-core-routing-y9aDF
+Commits: af7528c (S2.1), 56d3173 (S3.1), 33eacc4 (.gitignore)
+Repo: blackholecapital/ALI-ai
+
+===========================================================================
+SECTION 1 — EXACT PATH MAP (S3 declared artifacts)
+===========================================================================
+
+DECLARED PATH                                                    STATUS   COMMIT
+-----------------------------------------------------------------------  -------  -------
+job_site/executive_assistant_runtime/channels/telegram_bot.py    EXISTS   56d3173
+job_site/executive_assistant_runtime/channels/telegram_handlers.py EXISTS 56d3173
+job_site/executive_assistant_runtime/tests/test_telegram_wrapper.py EXISTS 56d3173
+
+SUPPORTING PATHS (S2.1 — required for S3 to function)
+job_site/executive_assistant_runtime/core/assistant_core.py      EXISTS   af7528c
+job_site/executive_assistant_runtime/core/dialog_manager.py      EXISTS   af7528c
+job_site/executive_assistant_runtime/core/action_router.py       EXISTS   af7528c
+job_site/executive_assistant_runtime/core/error_models.py        EXISTS   af7528c (patched 56d3173)
+job_site/executive_assistant_runtime/core/__init__.py            EXISTS   af7528c
+job_site/executive_assistant_runtime/channels/__init__.py        EXISTS   56d3173
+job_site/executive_assistant_runtime/tests/__init__.py           EXISTS   56d3173
+
+===========================================================================
+SECTION 2 — FILE LISTING (local filesystem, verified)
+===========================================================================
+
+/home/user/ALI-ai/job_site/executive_assistant_runtime/
+├── channels/
+│   ├── __init__.py                  (2 lines)
+│   ├── telegram_bot.py              (168 lines)
+│   └── telegram_handlers.py         (237 lines)
+├── core/
+│   ├── __init__.py                  (20 lines)
+│   ├── action_router.py             (273 lines)
+│   ├── assistant_core.py            (328 lines)
+│   ├── dialog_manager.py            (218 lines)
+│   └── error_models.py              (126 lines)
+└── tests/
+    ├── __init__.py                  (2 lines)
+    └── test_telegram_wrapper.py     (338 lines)
+
+===========================================================================
+SECTION 3 — SHA-256 CHECKSUMS
+===========================================================================
+
+2d60b4a3c403d11efcd030f2336b0c370649cead605620e5a7c43ff67a2e28d2  channels/telegram_bot.py
+dac91e78328d06beda1bbcd740436e008e328008ccff23d0f3e610e0e8233e07  channels/telegram_handlers.py
+d77f21f8d10d73e5f402c4821f1cc2a5840220908696b9fc9c8eae3ddf335216  tests/test_telegram_wrapper.py
+4604c637fa20ed890619f4baece960c1065c82ad12df237b667d8e124665295a  core/assistant_core.py
+8dfa1f05cbe6bc0f5a8f5a166e5550e1431bb2c98d53ef1015641701c8174a61  core/dialog_manager.py
+5cc934c25086c03e10d6818373cc922a1e91f69fd3240ac4315334f044afd63f  core/action_router.py
+da0520f5536dd0eb4aef021cc99c8deac4c0d677c9e31f7be0d8cf0331539e63  core/error_models.py
+
+===========================================================================
+SECTION 4 — BEHAVIOR COVERAGE
+===========================================================================
+
+BEHAVIOR                     TEST(S)                                    RESULT
+---------------------------  -----------------------------------------  ------
+Greeting flow (/start)       TestCallCore::test_start_returns_greeting   PASS
+                             TestCommandStart::test_start_calls_answer   SKIP*
+                             TestCommandStart::test_start_twice_same_user PASS
+Menu routing (5 actions)     TestCallbackHandlers::test_calendar_...    PASS
+                             TestCallbackHandlers::test_availability_... PASS
+                             TestCallbackHandlers::test_faq_...         PASS
+                             TestCallbackHandlers::test_ticket_...      PASS
+                             TestCallbackHandlers::test_unknown_...     PASS
+                             TestHelpers::test_menu_callbacks_map_...   PASS
+Assistant reply (free text)  TestFreeTextHandler::test_free_text_...    PASS
+                             TestFreeTextHandler::test_long_text_...    PASS
+Fallback / error safety      TestCallCore::test_unknown_text_returns... PASS
+                             TestFreeTextHandler::test_empty_text_...   PASS
+                             TestCallCore::test_cancellation_after_...  PASS
+Session isolation            TestCallCore::test_separate_users_...      PASS
+Channel separation (no       TestChannelIsolation::test_handler_...     PASS
+  core imports in wrapper)   TestChannelIsolation::test_bot_...         PASS
+/help command                TestCommandHelp::test_help_answer_...      PASS
+/menu command                TestCommandMenu::test_menu_answer_...      PASS
+Input helpers                TestHelpers (6 tests)                      PASS
+
+TOTAL: 24 PASS | 1 SKIP* | 0 FAIL
+
+* SKIP: TestCommandStart::test_start_calls_answer — requires aiogram package
+  installed at test runtime. Logic is covered by TestCallCore::test_start_*
+  which exercises the same _call_core() → AssistantCore path without aiogram.
+
+===========================================================================
+SECTION 5 — INTERACTION LOG NOTE
+===========================================================================
+
+The global interaction log (core/interaction_log.py) is declared as a S2.2
+Worker B artifact. It is not yet present in this file system — that artifact
+is outside S3.1 Worker A scope. The Telegram wrapper logs to the Python
+logging subsystem (logger = logging.getLogger(__name__)) in every handler.
+A dedicated interaction_log.py write call will be wired once S2.2 lands.
+
+===========================================================================
+SECTION 6 — CHANNEL SEPARATION CONFIRMATION
+===========================================================================
+
+Verified by TestChannelIsolation (2 tests PASS):
+- telegram_handlers.py has ZERO top-level "from core" or "import core" lines.
+  All core access is deferred inside _make_input() and _call_core().
+- telegram_bot.py has ZERO top-level "from core" or "import core" lines.
+  Core import is deferred inside create_bot() factory function.
+
+AssistantCore is received as a constructor argument (TelegramBot.__init__,
+build_router) and never constructed inside the channel wrapper itself.
+
+===========================================================================
+SECTION 7 — REPO EVIDENCE
+===========================================================================
+
+Branch:  claude/assistant-core-routing-y9aDF
+Remote:  blackholecapital/ALI-ai
+Commits introducing S3 artifacts:
+  56d3173  [EXEC-AI-RAPID-002 | S3.1] Build Telegram channel wrapper
+  33eacc4  Add .gitignore to exclude pycache and build artifacts
+
+All three declared S3 artifact paths exist in the repository at the above
+commit and are accessible via the attached local file system at:
+  /home/user/ALI-ai/job_site/executive_assistant_runtime/
+
+===========================================================================
+END OF EVIDENCE MAP
+===========================================================================
