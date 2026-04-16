@@ -1,0 +1,233 @@
+DEMO EVIDENCE REQUIREMENTS — EXEC-AI-STAGE2-003
+================================================
+Stage:       S5 (Minimal observability and runtime clarity)
+Owner:       Worker B
+Generated:   2026-04-16
+Scope:       Exact evidence artifacts Foreman B (Systems Foreman)
+             must have in hand to pass CF-TEST, CF-VERIFY, and S6
+             checkpoints. Captures what runbook steps produce; maps
+             each evidence item to the build-sheet acceptance gate
+             it satisfies.
+
+Companion runbook:  /job_site/demo_runbook.txt
+Build sheet:        /job_site/build-sheet-EXEC-AI-STAGE2-003.txt
+
+====================================================================
+0. ACCEPTED EVIDENCE SOURCES (per factory manual §14)
+====================================================================
+- attached file system (checked-in artifact)
+- exact repo URL (public GitHub commit / PR link)
+- attached archive
+- declared foreman handoff text
+- declared worker handoff text
+
+All evidence collected below MUST map to one of these sources before
+Foreman B accepts it.
+
+====================================================================
+1. EVIDENCE INDEX — WHAT TO CAPTURE AND WHERE IT LIVES
+====================================================================
+Every captured artifact is filed under:
+    /job_site/stage2_demo_evidence/
+so it sits next to the rest of the run documentation. If the operator
+works from a non-local environment, each item is mirrored into the
+repo on the designated branch and referenced by commit URL.
+
+Filename convention (prefix = phase from runbook):
+    01_prereq_getwebhookinfo.json
+    02a_text_roundtrip_curl_response.json
+    02b_session_latest_after_text.json
+    03_telegram_client_reply.png
+    04a_voice_success_response.json             (if Deepgram configured)
+    04b_voice_noop_502_response.json            (default noop path)
+    05a_ui_loading.png
+    05b_ui_empty.png
+    05c_ui_live.png
+    05d_ui_error.png
+    06_fallback_matrix.json
+    07_worker_tail.log
+
+====================================================================
+2. EVIDENCE ITEMS (each block = one required artifact)
+====================================================================
+
+E-01  Webhook registration evidence
+      filename: 01_prereq_getwebhookinfo.json
+      captured by: curl getWebhookInfo (runbook §1.4)
+      required fields in captured JSON:
+        result.url                  == "<BASE>/telegram/webhook"
+        result.pending_update_count == 0
+        result.last_error_message   absent or empty
+      satisfies: build-sheet required_operator_checks
+        - "confirm Cloudflare route resolves"
+        - "confirm Access is not blocking required public endpoints"
+      validator: Foreman B — deploy path targets workers.dev, not a
+                 gated custom domain (see cloudflare_access_matrix §2).
+
+E-02  Text round trip (synthetic)
+      filenames:
+        02a_text_roundtrip_curl_response.json
+        02b_session_latest_after_text.json
+      captured by: runbook §2.1 + §2.2
+      required assertions:
+        02a.ok == true
+        02a.handled == true
+        02a.event_id == "telegram:<sent update_id>"
+        02a.reply_message_id is a number
+        02b.ok == true
+        02b.items contains both:
+          { direction: "inbound",  text: "<sent text>" }
+          { direction: "outbound", text: "received: <sent text[0:200]>" }
+        02b.counts.inbound  >= 1
+        02b.counts.outbound >= 1
+      satisfies: build-sheet S2-CHECK pass_condition (one Telegram
+                 text message completes the webhook-normalize-reply
+                 round trip).
+
+E-03  Text round trip (real Telegram client)
+      filename: 03_telegram_client_reply.png
+      captured by: runbook §3.1-§3.3
+      required content in screenshot:
+        - operator's outbound message visible ("hello from telegram")
+        - bot reply visible ("received: hello from telegram")
+        - Telegram timestamp visible and within demo window
+      satisfies: build-sheet S2-CHECK under real Telegram traffic
+                 (not just curl-synthetic).
+
+E-04  Voice intake outcome
+      MUST capture exactly one of the two acceptable variants:
+        (a) with transcription provider configured (preferred):
+            filename: 04a_voice_success_response.json
+            captured by: runbook §4.2(a) plus /session/latest poll
+            required assertions:
+              webhook response: ok:true, handled:true,
+                                event_id, reply_message_id
+              /session/latest items include:
+                inbound  kind:"voice", text:"<transcript>"
+                outbound kind:"text",  text:"transcribed: <transcript>"
+        (b) without provider (demo-safe failure variant):
+            filename: 04b_voice_noop_502_response.json
+            captured by: runbook §4.2(b)
+            required assertions:
+              webhook response:
+                status == 502
+                body.ok == false
+                body.handled == true
+                body.stage == "transcription"
+                body.provider == "noop"
+                body.reason == "no transcription provider configured"
+                body.retryable == false
+              /session/latest items include:
+                inbound kind:"voice", text: null
+              no outbound item for this event_id.
+      satisfies: build-sheet S4-CHECK pass_condition (voice enters
+                 the same normalized pipeline as text or is safely
+                 and readably rejected).
+
+E-05  Operator UI state walk
+      filenames:
+        05a_ui_loading.png   — panes show "loading…"; marker "loading"
+        05b_ui_empty.png     — "no inbound messages yet" /
+                               "no assistant replies yet"
+        05c_ui_live.png      — transcript + response populated;
+                               marker "last event Ns ago"
+        05d_ui_error.png     — marker "error: ..."; panes retain
+                               prior content
+      capture rules:
+        - every screenshot includes the status bar
+          (#status-core, #status-state, #last-event-marker).
+        - 05c must show at least one inbound AND one outbound entry.
+        - 05d must be produced by intentionally breaking the data
+          source (see runbook §5.2 ERROR instructions).
+      satisfies: build-sheet S3-CHECK pass_condition (UI visibly
+                 reflects the live loop; no dead empty panes).
+
+E-06  Fallback matrix
+      filename: 06_fallback_matrix.json
+      captured by: runbook §6.1-§6.11 (one response each,
+                   concatenated into a single JSON array with
+                   { step, status, body } entries).
+      minimum coverage required for PASS:
+        * one 403  (wrong secret)
+        * one 400  (bad json OR missing update_id)
+        * one 200  { reason: "no_message" }         (§6.4)
+        * one 200  { reason: "kind:other" }         (§6.5)
+        * one 502  reason: "duration_too_long"      (§6.6)
+        * one 502  reason: "size_too_large"         (§6.7)
+        * one 404  on an unknown path               (§6.11)
+      satisfies: build-sheet S5-CHECK pass_condition (failures are
+                 visible, not silent) and voice_failure_modes.txt
+                 safety invariants I-1..I-4.
+
+E-07  Cloudflare runtime evidence
+      filenames:
+        07_worker_tail.log                — output of `npx wrangler tail`
+                                            during the golden-path run
+        07_cloudflare_dashboard.png       — workers.cloudflare.com
+                                            deployment page showing
+                                            the "ali-ai" Worker active
+      required content:
+        - tail log contains at least one request line per evidence
+          item above (webhook POSTs and /session/latest GETs).
+        - dashboard screenshot shows the deployed version active on
+          the workers.dev subdomain (per cloudflare_prep_report §6).
+      satisfies: build-sheet accepted_validation_evidence:
+        - cloudflare_dashboard_screenshot
+        - deployed_route_screenshot
+
+====================================================================
+3. MAPPING TO BUILD-SHEET GATES
+====================================================================
+  build-sheet gate                 required evidence
+  -------------------------------  ----------------------------
+  S2-CHECK                         E-02, E-03
+  S3-CHECK                         E-02 (items), E-05 (all 4)
+  S4-CHECK                         E-04 (either variant)
+  S5-CHECK                         E-06 (fallback matrix)
+  CF-TEST-CHECK                    E-01, E-07, any one of
+                                   E-02 / E-03 / E-04 live response
+  CF-VERIFY-CHECK                  E-01, E-07, E-05
+  S6-CHECK                         ALL (E-01 through E-07)
+
+====================================================================
+4. FORMAT RULES
+====================================================================
+- JSON evidence MUST be valid JSON (no HTML wrapper, no curl meta).
+  If a response is non-JSON, record it as { "raw": "<text>" }.
+- PNG evidence MUST be full-pane screenshots, not cropped snippets,
+  so the status bar and pane headers stay visible.
+- Every evidence file MUST include a timestamp within the screenshot
+  or as a sibling JSON file with { "captured_at": "<ISO8601>" }.
+- No evidence file may contain live secrets (BOT_TOKEN, HOOK_SECRET,
+  DEEPGRAM_API_KEY). Redact to "<REDACTED>" before committing.
+- Redactions must be visible in the screenshot (opaque bar), not
+  cropped away, so the reviewer can confirm a field existed.
+
+====================================================================
+5. DELIVERY
+====================================================================
+Single artifact index file at:
+    /job_site/stage2_demo_evidence/INDEX.txt
+that lists:
+    file | E-xx | captured_at | checksum_sha256
+This index is what Foreman B reads first. Missing index == PATCH.
+
+====================================================================
+6. EVIDENCE CHECKLIST (print, tick as you go)
+====================================================================
+  [ ] E-01 getWebhookInfo JSON captured
+  [ ] E-02a synthetic text webhook JSON captured
+  [ ] E-02b /session/latest JSON captured post-text
+  [ ] E-03 Telegram client reply screenshot captured
+  [ ] E-04 voice outcome (variant a OR variant b) captured
+  [ ] E-05a UI loading screenshot captured
+  [ ] E-05b UI empty screenshot captured
+  [ ] E-05c UI live screenshot captured
+  [ ] E-05d UI error screenshot captured
+  [ ] E-06 fallback matrix JSON captured (>= 7 steps)
+  [ ] E-07 wrangler tail log captured
+  [ ] E-07 Cloudflare dashboard screenshot captured
+  [ ] INDEX.txt written at /job_site/stage2_demo_evidence/INDEX.txt
+  [ ] all secrets redacted in every file
+
+Any unchecked row at CF-TEST handoff = PATCH.
