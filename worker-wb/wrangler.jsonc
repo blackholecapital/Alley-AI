@@ -4,12 +4,19 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ali-ai-worker-wb",
   "main": "src/index.ts",
-  "compatibility_date": "2024-12-01",
+  "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat"],
 
   // Build — Wrangler bundles TypeScript natively; no separate build step needed.
   // If a custom build becomes necessary, uncomment:
   // "build": { "command": "npm run build" },
+
+  // ── Static assets ─────────────────────────────────────────────────
+  // NOT configured. This Worker is API-only; no static asset directory
+  // exists. When UI assets are needed, add:
+  //   "assets": { "directory": "./public" }
+  // and create the directory with at least an index.html before boot.
+  // See: job_site/executive_assistant_runtime/docs/assets_plan.md
 
   // ── vars: plain-text runtime configuration ────────────────────────
   // These are NOT secrets. Secrets go in .dev.vars (local) or
