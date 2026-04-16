@@ -1,0 +1,121 @@
+CLOUDFLARE TEST EVIDENCE INDEX — EXEC-AI-STAGE2-003 | CF-TEST | WORKER A
+=========================================================================
+Scope: catalog of evidence items the operator must capture during the
+CF-TEST deploy run. Each item has a fixed ID so CF-VERIFY (Foreman B)
+can reference it by id without rediscovering the mapping.
+
+Source prompt:   /job_site/cloudflare_operator_prompt.txt
+Prep source:     /job_site/cloudflare_prep_report.txt
+Env reference:   /job_site/demo_env_matrix.txt
+
+Build sheet CF-TEST required_stage_artifacts mapping:
+   deployed_route                       -> E-10
+   healthcheck_response_or_equivalent   -> E-32 or E-35
+   screenshot_of_live_route             -> E-31 and E-36
+   /job_site/cloudflare_operator_prompt.txt       -> this prompt
+   /job_site/cloudflare_test_evidence_index.txt   -> this index
+
+---------------------------------------------------------------------
+GROUP 0 — PRE-DEPLOY STATE
+---------------------------------------------------------------------
+ID     SOURCE                                      REQUIRED  NOTES
+-----  ------------------------------------------  --------  ---------------
+E-00   `wrangler whoami` terminal paste             yes       account email + id
+E-01   `wrangler secret list` terminal paste        yes       names only; redact values
+E-02   git branch + HEAD SHA                        yes       must be
+                                                              claude/verify-cloudflare-config-C6iGA
+E-03   `git status --short` terminal paste          yes       must be empty
+
+---------------------------------------------------------------------
+GROUP 1 — DEPLOY
+---------------------------------------------------------------------
+ID     SOURCE                                      REQUIRED  NOTES
+-----  ------------------------------------------  --------  ---------------
+E-10   full terminal output of                      yes       captures deployed_route
+       `cd worker-wb && npm run deploy`                       and deployment id
+E-11   workers.dev URL extracted from E-10          yes       canonical public test URL
+E-12   custom domain URL (if attached)              optional  only if Stage 1 custom
+                                                              domain still active
+
+---------------------------------------------------------------------
+GROUP 2 — CLOUDFLARE DASHBOARD
+---------------------------------------------------------------------
+ID     SOURCE                                      REQUIRED  NOTES
+-----  ------------------------------------------  --------  ---------------
+E-20   screenshot: Workers & Pages -> ali-ai ->     yes       new version timestamped
+       Deployments                                            within last few minutes
+E-21   screenshot: Settings -> Triggers /           yes       shows workers.dev + any
+       Custom Domains                                         custom domain route
+
+---------------------------------------------------------------------
+GROUP 3 — LIVE ROUTE VERIFICATION (workers.dev URL)
+---------------------------------------------------------------------
+ID     ROUTE                EXPECTED                REQUIRED  NOTES
+-----  -------------------  ----------------------  --------  ---------------
+E-30   GET /                200 + index.html        yes       UI shell via assets
+                            head of body
+E-31   browser screenshot   rendered UI             yes       visible status bar
+       of GET /                                               "Executive Assistant"
+E-32   GET /health          404 + empty body        yes       current known behavior;
+                                                              /health not dispatched
+                                                              on this branch
+E-33   GET /telegram/webhook 405 + error envelope   yes       method_not_allowed
+E-34   POST /telegram/webhook 403 + error envelope  yes       forbidden (secret mismatch)
+       without secret header
+E-35   GET /session/latest  200 + JSON snapshot     yes       contains session.session_id,
+                                                              items[], counts{}
+E-36   browser screenshot   UI rendering items      optional  only if live Telegram
+       of operator UI       from /session/latest               round trip already run
+
+---------------------------------------------------------------------
+GROUP 4 — CLOUDFLARE ACCESS CHECK (custom-domain only)
+---------------------------------------------------------------------
+ID     ROUTE                SOURCE                  REQUIRED  NOTES
+-----  -------------------  ----------------------  --------  ---------------
+E-40a  GET  /               curl from clean client  if custom E-40a..d only required
+E-40b  GET  /health         curl from clean client  domain    when custom domain is
+E-40c  GET  /session/latest curl from clean client  in scope  attached; compare to
+E-40d  POST /telegram/webhook curl from clean client           cloudflare_access_matrix
+                            (no body)                          declared expectations
+
+---------------------------------------------------------------------
+GROUP 5 — LOGS
+---------------------------------------------------------------------
+ID     SOURCE                                      REQUIRED  NOTES
+-----  ------------------------------------------  --------  ---------------
+E-50   `wrangler tail` terminal paste covering      yes       must show at least one
+       one full request cycle                                request.start ->
+                                                              request.end pair with
+                                                              matching correlation_id
+
+---------------------------------------------------------------------
+GROUP 6 — SUMMARY RETURN
+---------------------------------------------------------------------
+ID     SOURCE                                      REQUIRED  NOTES
+-----  ------------------------------------------  --------  ---------------
+E-60   workers.dev URL + custom domain URL (if any) yes       plain text
+E-61   list of routes whose observed behavior       yes       "none" is a valid value
+       did not match Group 3 expectations
+
+---------------------------------------------------------------------
+EVIDENCE COLLECTION RULES
+---------------------------------------------------------------------
+1. Each evidence item is text-paste OR image screenshot only. No
+   narrative-only claims.
+2. Redact secret values wherever they appear. Never paste bot tokens
+   or Deepgram keys.
+3. Correlation IDs from response headers and log lines must match
+   across paired items (e.g. E-34 correlation_id should appear in
+   E-50 for the forbidden request).
+4. If an evidence item cannot be captured, record the exact blocker
+   instead of skipping. Missing evidence without an explanation is a
+   PATCH condition at CF-VERIFY.
+
+---------------------------------------------------------------------
+HANDOFF
+---------------------------------------------------------------------
+Once Groups 0-5 are complete and Group 6 is filled in, return to
+Foreman A with the evidence bundle. Foreman A hands off to Foreman B
+for CF-VERIFY per build sheet handoff on_pass declaration:
+   next_stage: CF-VERIFY
+   next_owner: "Foreman B the Systems Foreman"

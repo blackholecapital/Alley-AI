@@ -1,0 +1,217 @@
+CLOUDFLARE OPERATOR PROMPT — EXEC-AI-STAGE2-003 | CF-TEST | WORKER A
+=====================================================================
+Operator: use this prompt verbatim to perform the Stage 2 Cloudflare
+deploy and live runtime check. Commands are current-valid against
+/worker-wb/wrangler.jsonc and /worker-wb/package.json. Do not deviate
+from the declared root path or deploy command.
+
+Branch under test: claude/verify-cloudflare-config-C6iGA
+Last commit on branch: see `git log -1` inside the repo before deploy.
+
+====================================================================
+PROMPT — COPY AND RUN
+====================================================================
+
+You are the operator performing the Stage 2 Cloudflare deploy for
+EXEC-AI-STAGE2-003. Execute the following steps in order. Do not skip
+or reorder. Collect the evidence named at each step; filenames and
+content expectations are listed in
+/job_site/cloudflare_test_evidence_index.txt.
+
+---------- 0. PRE-DEPLOY CHECKLIST ----------
+
+a) You are authenticated to the correct Cloudflare account:
+     cd /home/user/ALI-ai/worker-wb
+     wrangler whoami
+   Expected: account email and ID printed.
+   Evidence: E-00  (terminal paste)
+
+b) Secrets are configured for production:
+     wrangler secret list
+   Expected keys present:
+     TELEGRAM_BOT_TOKEN
+     TELEGRAM_WEBHOOK_SECRET
+   Optional (only if voice transcription is in scope):
+     DEEPGRAM_API_KEY
+   Evidence: E-01  (terminal paste; redact values)
+
+c) Repo branch is the one under test:
+     git -C /home/user/ALI-ai rev-parse --abbrev-ref HEAD
+     git -C /home/user/ALI-ai rev-parse HEAD
+   Expected branch: claude/verify-cloudflare-config-C6iGA
+   Evidence: E-02  (branch name + commit SHA)
+
+d) No uncommitted changes on branch:
+     git -C /home/user/ALI-ai status --short
+   Expected: empty output.
+   Evidence: E-03  (terminal paste)
+
+---------- 1. DEPLOY ----------
+
+Run the canonical Stage 2 deploy command exactly as declared:
+
+    cd /home/user/ALI-ai/worker-wb && npm run deploy
+
+This invokes `wrangler deploy` from /worker-wb using
+/worker-wb/wrangler.jsonc. No other deploy path is supported for
+Stage 2.
+
+Expected terminal output contains:
+  - "Total Upload: ... KiB"
+  - "Uploaded ali-ai (NNN seconds)"
+  - "Deployed ali-ai triggers"
+  - A workers.dev URL of the form:
+      https://ali-ai.<account-subdomain>.workers.dev
+  - A custom-domain route line if the Stage 1 custom domain is still
+    attached in Cloudflare dashboard.
+
+Evidence: E-10  (full terminal output of the deploy command)
+Capture: deployed_route URL (workers.dev AND custom domain if any)
+
+---------- 2. CLOUDFLARE DASHBOARD CONFIRMATION ----------
+
+In a browser, log into Cloudflare and navigate to:
+  Workers & Pages -> ali-ai
+
+Confirm:
+  a) "Deployments" tab shows the new version at the top, timestamped
+     within the last few minutes of the step 1 deploy.
+  b) "Settings -> Triggers" shows workers.dev enabled and any custom
+     domain route still attached.
+  c) "Settings -> Variables" shows the plain vars from wrangler.jsonc
+     (ENVIRONMENT, WORKER_VERSION, LOG_LEVEL, PROXY_BACKEND_URL) and
+     the secret names configured in step 0.b.
+
+Evidence: E-20  (screenshot of Deployments tab with the new version)
+Evidence: E-21  (screenshot of Triggers / Custom Domains panel)
+
+---------- 3. LIVE ROUTE VERIFICATION ----------
+
+Let $WORKER = the workers.dev URL emitted in step 1 (preferred for
+test — not gated by Cloudflare Access). If only the custom domain is
+in scope, use it instead and be explicit about that choice.
+
+Declared required public routes (per build sheet
+cloudflare_deployment_plan.required_public_test_routes):
+   /
+   /health
+   /telegram/webhook
+   /session/latest
+
+Run each check and record the exact HTTP status and response body.
+
+3.1 Root UI shell "/"
+    curl -is "$WORKER/"
+    Expected:
+      HTTP/2 200
+      content-type: text/html; charset=UTF-8
+      body starts with "<!DOCTYPE html>" and includes
+      "Executive Assistant — Operator UI" (served from
+      /worker-wb/public/index.html via the assets binding).
+    Evidence: E-30  (status + headers + first 30 body lines)
+    Evidence: E-31  (browser screenshot of the rendered UI)
+
+3.2 Health probe "/health"
+    curl -is "$WORKER/health"
+    CURRENT EXPECTED behavior on this branch:
+      HTTP/2 404
+      empty body
+    NOTE: /health is declared in the build sheet as a required public
+    route but the Worker on this branch does not dispatch a handler
+    for it. If operator policy requires a live /health response,
+    route back to Foreman A as PATCH; otherwise use /session/latest
+    (step 3.4) as the "healthcheck_response_or_equivalent" evidence
+    declared in build sheet CF-TEST required_stage_artifacts.
+    Evidence: E-32  (curl output)
+
+3.3 Telegram webhook "/telegram/webhook"
+    a) Wrong method:
+         curl -is "$WORKER/telegram/webhook"
+       Expected:
+         HTTP/2 405
+         x-correlation-id: <uuid or cf-ray>
+         body: {"ok":false,"error":{"code":"method_not_allowed",...},
+                "correlation_id":"..."}
+       Evidence: E-33
+
+    b) POST without secret header:
+         curl -is -X POST "$WORKER/telegram/webhook" \
+              -H "content-type: application/json" \
+              -d '{"update_id":1}'
+       Expected:
+         HTTP/2 403
+         body: {"ok":false,"error":{"code":"forbidden",...},
+                "correlation_id":"..."}
+       Evidence: E-34
+
+    c) POST with the correct secret header is NOT required for CF-TEST
+       evidence — a live Telegram round trip is the S2-CHECK test and
+       will have been captured separately in
+       telegram_text_roundtrip_checklist.txt. For CF-TEST we only
+       verify that the route is reachable and enforces auth.
+
+3.4 Session snapshot "/session/latest"
+    curl -is "$WORKER/session/latest"
+    Expected:
+      HTTP/2 200
+      content-type: application/json
+      cache-control: no-store
+      x-correlation-id: <value>
+      body: {"ok":true,"session":{"session_id":"<uuid>",
+             "started_at":"<iso>","last_event_at":<null|iso>},
+             "items":[...],"counts":{"inbound":n,"outbound":n,
+             "total":n},"correlation_id":"..."}
+    Evidence: E-35  (full curl output)
+    Evidence: E-36  (screenshot of the operator UI rendering recent
+                     items after a Telegram text send, if Telegram
+                     path is live end-to-end)
+
+---------- 4. CLOUDFLARE ACCESS EXPECTATION CHECK ----------
+
+On the custom-domain URL (if attached), curl each of the four routes
+without an Access login session and record whether the response body
+is the declared Worker response or the Cloudflare Access login page.
+
+For each route, expected:
+  - Worker-origin response (JSON or HTML) for a public route
+  - Access redirect (302 to <account>.cloudflareaccess.com) ONLY if
+    the route is intentionally gated in Zero Trust
+  - See /job_site/cloudflare_access_matrix.txt (Worker B CF-PREP
+    artifact) for the declared expectation per route.
+
+Evidence: E-40  (per-route curl from the custom domain)
+
+---------- 5. LOG TAIL ----------
+
+With the webhook test from step 3.3.b still fresh, run:
+    cd /home/user/ALI-ai/worker-wb && npm run tail
+
+Confirm structured log lines are emitted:
+  - request.start   with method, path, correlation_id
+  - telegram.webhook.secret_mismatch (if step 3.3.b was triggered)
+  - request.end     with status and duration_ms
+
+Evidence: E-50  (terminal paste of at least one full request cycle)
+
+---------- 6. REPORT BACK ----------
+
+Return to Foreman A with:
+  - all evidence items named in
+    /job_site/cloudflare_test_evidence_index.txt populated
+  - the workers.dev URL and (if any) the custom-domain URL
+  - any route whose live behavior did not match the expected response
+    above, flagged as a PATCH candidate for CF-VERIFY
+
+STOP. Do not iterate on failures inside CF-TEST scope. Failures go to
+Foreman A as PATCH; Foreman A decides whether to return to CF-TEST or
+escalate to Factory Control Interface per build sheet handoff rules.
+
+====================================================================
+END OF PROMPT
+====================================================================
+
+Canonical references for this prompt:
+  /job_site/cloudflare_prep_report.txt
+  /job_site/demo_env_matrix.txt
+  /worker-wb/wrangler.jsonc
+  /worker-wb/package.json
