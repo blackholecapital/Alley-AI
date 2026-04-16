@@ -19,11 +19,9 @@
   // "build": { "command": "npm run build" },
 
   // ── Static assets ─────────────────────────────────────────────────
-  // NOT configured. This Worker is API-only; no static asset directory
-  // exists. When UI assets are needed, add:
-  //   "assets": { "directory": "./public" }
-  // and create the directory with at least an index.html before boot.
-  // See: job_site/executive_assistant_runtime/docs/assets_plan.md
+  "assets": {
+    "directory": "./public"
+  },
 
   // ── Cloudflare Access / Zero Trust ────────────────────────────────
   // If the Worker's custom-domain route is behind a Cloudflare Access
