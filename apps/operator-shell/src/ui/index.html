@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Executive Assistant — Operator Shell</title>
+  <style>
+    /* Minimal additive styles for S3 state surfaces only.
+       The existing shell layout (status bar, transcript / response panes,
+       input footer) is preserved from worker-wb/public/index.html. */
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           margin: 0; background: #0f1115; color: #e6e8eb; }
+    .status-bar { display: flex; gap: 12px; align-items: center;
+                  padding: 8px 12px; background: #1a1d23;
+                  border-bottom: 1px solid #2a2d34; font-size: 13px; }
+    .status-title { font-weight: 600; }
+    .status-divider { color: #555; }
+    .status-item { color: #a5a9b3; }
+    .status-value { color: #e6e8eb; font-variant-numeric: tabular-nums; }
+    .status-value[data-state="live"]    { color: #7cdc7c; }
+    .status-value[data-state="empty"]   { color: #a5a9b3; }
+    .status-value[data-state="loading"] { color: #f0c674; }
+    .status-value[data-state="error"]   { color: #ff6b6b; }
+    .monospace { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    #last-event-marker {
+      margin-left: auto;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #2a2d34;
+      font-size: 12px;
+      color: #a5a9b3;
+    }
+
+    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+              padding: 8px; height: calc(100vh - 42px); box-sizing: border-box; }
+    .pane { display: flex; flex-direction: column;
+            background: #15181e; border: 1px solid #2a2d34;
+            border-radius: 8px; min-height: 0; }
+    .pane-header { padding: 8px 12px; border-bottom: 1px solid #2a2d34;
+                   display: flex; align-items: center; justify-content: space-between; }
+    .pane-label { font-weight: 600; font-size: 13px; }
+    .pane-body { flex: 1 1 auto; overflow-y: auto; padding: 8px 12px; }
+    .pane-placeholder { color: #6b6f78; font-style: italic; margin: 0; }
+
+    .entry { padding: 6px 8px; margin: 4px 0; border-radius: 6px;
+             background: #1a1d23; }
+    .entry-inbound  { border-left: 3px solid #4da3ff; }
+    .entry-outbound { border-left: 3px solid #7cdc7c; }
+    .entry-body { white-space: pre-wrap; word-break: break-word; }
+    .entry-meta { margin-top: 2px; font-size: 11px; color: #6b6f78; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Status bar ────────────────────────────────────────────────────
+       DOM hooks consumed by session-view.js:
+         #status-core           — live / idle / loading / error label
+         #status-state          — current UIRenderState.kind
+         #status-session        — session id (short)
+         #last-event-marker     — "last event Xs ago" badge
+       Preserved from worker-wb/public/index.html where applicable. -->
+  <header class="status-bar">
+    <span class="status-title">Executive Assistant</span>
+    <span class="status-divider">|</span>
+    <span class="status-item">Core: <span id="status-core" class="status-value">—</span></span>
+    <span class="status-divider">|</span>
+    <span class="status-item">State: <span id="status-state" class="status-value">—</span></span>
+    <span class="status-divider">|</span>
+    <span class="status-item">Session: <span id="status-session" class="status-value monospace">—</span></span>
+    <span id="last-event-marker">—</span>
+  </header>
+
+  <main class="panels">
+    <section class="pane" id="pane-transcript" aria-label="Inbound transcript">
+      <div class="pane-header">
+        <span class="pane-label">Transcript (inbound)</span>
+      </div>
+      <div class="pane-body" id="transcript-log">
+        <p class="pane-placeholder">waiting for first poll…</p>
+      </div>
+    </section>
+
+    <section class="pane" id="pane-response" aria-label="Outbound assistant">
+      <div class="pane-header">
+        <span class="pane-label">Assistant Response (outbound)</span>
+      </div>
+      <div class="pane-body" id="response-log">
+        <p class="pane-placeholder">waiting for first poll…</p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./session-view.js"></script>
+</body>
+</html>

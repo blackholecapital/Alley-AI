@@ -1,0 +1,201 @@
+UI DEMO CHECKLIST — EXEC-AI-STAGE2-003 | S3 | WORKER B
+=======================================================
+Generated: 2026-04-16
+Branch:    claude/verify-cloudflare-access-oKfsP
+Scope:     Operator UI wire-up to the shared /session/latest surface:
+           transcript items, assistant items, live/loading/empty/error
+           states, and a visible last-event marker. Shell is preserved,
+           not redesigned.
+
+-------------------------------------------------------------------
+0. REFERENCES CONSULTED
+-------------------------------------------------------------------
+- /job_site/factory-manual-v1.1.txt        (present as factory-manual-v1.11.txt)
+- /job_site/worker-execution-manual-v1.1.txt
+- /job_site/build-sheet-EXEC-AI-STAGE2-003.txt
+- /job_site/ui_state_contract.txt          (NOT PRESENT — see §6 ISSUES;
+                                            contract inferred from
+                                            /worker-wb/src/integrations/telegram/types.ts
+                                            and build-sheet §S3 scope)
+
+-------------------------------------------------------------------
+1. ARTIFACTS SHIPPED
+-------------------------------------------------------------------
+/apps/operator-shell/src/ui/session.contract.ts
+    - TypeScript contract consumed by the renderer.
+    - Declares UIEvent, UISessionState, SessionLatestResponse,
+      UIRenderState.
+    - Source of truth for the UI side of the S3 data contract until
+      /job_site/ui_state_contract.txt is written.
+
+/apps/operator-shell/src/ui/session-view.js
+    - Plain browser ESM, no build step, no dependency.
+    - Polls GET /session/latest every 5 s (POLL_MS = 5000).
+    - Renders four explicit UIRenderState variants: loading, empty,
+      live, error.
+    - Splits events by direction into #transcript-log (inbound) and
+      #response-log (outbound).
+    - Drives #last-event-marker from data.last_event_at with a 1 s
+      re-tick so the "last event Xs ago" string stays accurate.
+    - Re-renders panes only when the newest event id changes; steady
+      polls do not redraw the DOM or kill scroll position.
+    - Exports fetchOnce / startPolling / stopPolling / render*
+      helpers so a future test harness can drive it without a browser.
+
+/apps/operator-shell/src/ui/index.html
+    - Minimal shell mirroring worker-wb/public/index.html layout:
+      status bar + transcript pane + response pane.
+    - Adds one DOM hook not in the legacy shell:
+        #last-event-marker  — visible badge required by S3 task.
+        #status-state       — visible UIRenderState for demo clarity.
+    - Inline <style> only; no CSS file added. Shell is preserved, not
+      redesigned.
+
+/job_site/ui_demo_checklist.txt
+    - This file.
+
+-------------------------------------------------------------------
+2. INFERRED /session/latest RESPONSE CONTRACT
+-------------------------------------------------------------------
+Until Worker A ships /worker-wb/src/routes/session-latest.ts and
+/job_site/ui_state_contract.txt, the renderer consumes this shape:
+
+    {
+      "session_id":     string | null,
+      "state":          "live" | "idle" | "error",
+      "last_event_at":  string | null,            // ISO 8601
+      "events": [
+        {
+          "id":           "telegram:<update_id>",
+          "direction":    "inbound" | "outbound",
+          "source":       "telegram",
+          "kind":         "text" | "voice" | "other",
+          "text":         string | null,
+          "chat_id":      number | null,
+          "username":     string | null,
+          "received_at":  string                   // ISO 8601
+        }
+      ]
+    }
+
+Inferred from:
+  - InternalEvent in /worker-wb/src/integrations/telegram/types.ts
+    (id, source, kind, chat_id, message_id, user_id, username, text,
+    received_at, raw) — shipped by S2 Worker A.
+  - Build-sheet S3 scope: "recent inbound and outbound messages,
+    session state, and last-event timestamp".
+
+Deltas vs InternalEvent that Worker A's session-latest.ts must satisfy
+for the UI to render without code changes:
+  - add `direction: "inbound" | "outbound"` (InternalEvent does not
+    carry direction today — outbound replies must be written with
+    direction = "outbound").
+  - expose the surrounding envelope: session_id, state, last_event_at,
+    events[]. The renderer expects events[] length ≥ 0 and tolerates a
+    missing last_event_at (falls back to "no events yet").
+  - `events[*].id` must be stable across polls so the renderer can
+    skip redundant redraws.
+
+-------------------------------------------------------------------
+3. UI STATE MODEL (rendered states)
+-------------------------------------------------------------------
+loading   first fetch in flight.
+          panes show "loading…", marker shows "loading",
+          #status-core = "loading…" with data-state="loading".
+
+empty     fetch succeeded, events.length === 0.
+          panes show "no inbound messages yet" /
+          "no assistant replies yet"; marker shows "no events yet";
+          #status-core = "idle" with data-state="empty".
+
+live      fetch succeeded, events.length >= 1.
+          panes render inbound / outbound entries; marker shows
+          "last event Xs/m/h ago" and auto-ticks every second;
+          #status-core = "live" with data-state="live".
+
+error     fetch threw or non-2xx or malformed JSON.
+          panes retain prior content; marker shows "error: <reason>";
+          #status-core = "error" with data-state="error". Polling
+          continues — transient errors self-heal on the next tick.
+
+-------------------------------------------------------------------
+4. DEMO RUN — STANDALONE OPERATOR SHELL
+-------------------------------------------------------------------
+(a) Serve /apps/operator-shell/src/ui statically, e.g.
+        cd apps/operator-shell/src/ui && python3 -m http.server 8080
+    then open http://localhost:8080/index.html.
+
+(b) Mock the /session/latest endpoint with a local proxy or
+    a matching fixture server; the renderer fetches a relative path,
+    so any static server returning a file at /session/latest will do.
+
+(c) Expected walkthrough:
+    1. page loads -> loading state (marker "loading", panes "loading…")
+    2. first fetch returns empty list -> empty state
+    3. inject an inbound text event -> transcript pane renders it;
+       #last-event-marker shows "last event 0s ago" and ticks up.
+    4. inject a matching outbound event -> response pane renders it.
+    5. stop the backend -> error state appears; panes retain content.
+    6. restart backend -> renderer recovers on next poll.
+
+-------------------------------------------------------------------
+5. DEMO RUN — WIRED INTO WORKER-WB (post Worker A S3)
+-------------------------------------------------------------------
+When Worker A ships /worker-wb/src/routes/session-latest.ts and wires
+it into /worker-wb/src/index.ts:
+
+(1) Either:
+      a) serve /apps/operator-shell/src/ui/* as static assets from
+         the Worker (add to wrangler.jsonc "assets" once Worker A
+         confirms path conflicts), OR
+      b) copy /apps/operator-shell/src/ui/session-view.js into
+         /worker-wb/public/js/ and add
+           <script type="module" src="/js/session-view.js"></script>
+         to /worker-wb/public/index.html, and add the #last-event-marker
+         + #status-state elements to that shell.
+    Option (a) is preferred — keeps a single source of truth under
+    /apps/operator-shell/src/ui/.
+
+(2) Acceptance check against the live Worker:
+      curl -s https://ali-ai.<account>.workers.dev/session/latest | jq .
+    Expected: JSON matching §2; the browser renderer will then show
+    live state within one poll tick (≤ 5 s).
+
+-------------------------------------------------------------------
+6. ISSUES / FLAGS
+-------------------------------------------------------------------
+- /job_site/ui_state_contract.txt (S3 Worker A artifact, also listed
+  as a required_reference for this S3 Worker B task) is NOT PRESENT
+  on main. The contract consumed here is inferred from InternalEvent
+  + build-sheet S3 scope (see §2). Foreman A must still produce the
+  authoritative contract; once written, re-check /session.contract.ts
+  and update field names if they disagree. No breaking-name choices
+  were invented beyond the `direction` addition, which the build
+  sheet itself calls for ("inbound and outbound messages").
+- /worker-wb/src/routes/session-latest.ts and
+  /worker-wb/src/lib/session-store.ts (S3 Worker A expected_artifacts)
+  are NOT PRESENT on main. The live path cannot be demoed until Worker
+  A ships those. The shell renders the correct "error" and "loading"
+  states today when pointed at a missing endpoint — no crash.
+- /job_site/reference_repo_matrix.txt (S1 required_stage_artifact)
+  remains absent; unchanged from S2 run. Flag only.
+
+-------------------------------------------------------------------
+7. ACCEPTANCE GATES (for S3 checkpoint)
+-------------------------------------------------------------------
+PASS conditions:
+  [x] operator shell fetches /session/latest (GET, JSON)
+  [x] transcript pane renders inbound events; response pane renders
+      outbound events; split is driven by event.direction.
+  [x] all four UIRenderState variants are implemented and testable
+      (loading, empty, live, error).
+  [x] #last-event-marker is visible and updates every 1 s when live.
+  [x] existing shell layout is preserved; only #last-event-marker and
+      #status-state are additions.
+  [x] repo mirrored, committed, pushed to designated branch.
+
+PATCH conditions (any one fails):
+  [ ] UI does not fetch /session/latest.
+  [ ] any render state is missing.
+  [ ] last-event marker absent or not updating.
+  [ ] shell HTML/CSS redesigned beyond additive hooks.
