@@ -1,4 +1,5 @@
 import { handleTelegramWebhook } from './routes/telegram-webhook';
+import { handleSessionLatest } from './routes/session-latest';
 import type { TelegramEnv } from './integrations/telegram/types';
 
 interface Env extends TelegramEnv {
@@ -13,6 +14,10 @@ export default {
 
     if (url.pathname === '/telegram/webhook') {
       return handleTelegramWebhook(request, env);
+    }
+
+    if (url.pathname === '/session/latest') {
+      return handleSessionLatest(request);
     }
 
     return new Response(null, { status: 404 });
