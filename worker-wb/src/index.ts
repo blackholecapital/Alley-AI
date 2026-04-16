@@ -1,8 +1,9 @@
 import { handleTelegramWebhook } from './routes/telegram-webhook';
 import { handleSessionLatest } from './routes/session-latest';
 import type { TelegramEnv } from './integrations/telegram/types';
+import type { TranscriptionEnv } from './providers/transcription/provider';
 
-interface Env extends TelegramEnv {
+interface Env extends TelegramEnv, TranscriptionEnv {
   ENVIRONMENT?: string;
   WORKER_VERSION?: string;
   LOG_LEVEL?: string;
