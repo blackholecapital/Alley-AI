@@ -1,0 +1,122 @@
+CLOUDFLARE PREP REPORT — EXEC-AI-STAGE2-003 | CF-PREP | WORKER A
+================================================================
+Generated: 2026-04-16
+Branch: claude/verify-cloudflare-config-C6iGA
+Scope: Verify exact deploy root, Wrangler config path, deploy command,
+       and required public routes for Stage 2. Current-valid paths only.
+
+----------------------------------------------------------------
+1. DEPLOY ROOT
+----------------------------------------------------------------
+app_root_path (repo-relative): /worker-wb
+absolute_path:                 /home/user/ALI-ai/worker-wb
+verified:                      exists, contains wrangler.jsonc + package.json + src/index.ts
+repo_root_conflict_check:
+   /home/user/ALI-ai/wrangler.toml   : NOT FOUND
+   /home/user/ALI-ai/wrangler.jsonc  : NOT FOUND
+   /home/user/ALI-ai/wrangler.json   : NOT FOUND
+   /home/user/ALI-ai/package.json    : NOT FOUND
+conclusion: no repo-root config can override /worker-wb wrangler context.
+
+----------------------------------------------------------------
+2. WRANGLER CONFIG PATH
+----------------------------------------------------------------
+wrangler_config_path: /worker-wb/wrangler.jsonc
+format:               JSONC (schema: node_modules/wrangler/config-schema.json)
+key_fields (current):
+   name                 = "ali-ai"
+   main                 = "src/index.ts"        (resolves to /worker-wb/src/index.ts)
+   compatibility_date   = "2025-04-01"
+   compatibility_flags  = ["nodejs_compat"]
+   workers_dev          = true                  (matches build sheet: workers_dev_required yes)
+   preview_urls         = true                  (matches build sheet: preview_urls_required yes)
+   assets.directory     = "./public"            (resolves to /worker-wb/public)
+   observability.enabled= true
+   vars                 = ENVIRONMENT, WORKER_VERSION, LOG_LEVEL, PROXY_BACKEND_URL
+build_block:          none declared — wrangler bundles TypeScript natively
+                      (matches build sheet: "wrangler-managed TypeScript bundle")
+
+----------------------------------------------------------------
+3. DEPLOY COMMAND
+----------------------------------------------------------------
+canonical_deploy_command: cd worker-wb && npm run deploy
+npm_script_definition:    "deploy": "wrangler deploy"
+                          (declared in /worker-wb/package.json)
+wrangler_version_pinned:  ^4.83.0 (devDependency)
+
+alternative_invocation:
+   ./worker-wb/scripts/deploy_worker.sh
+   - resolves WORKER_ROOT = /worker-wb via script-relative path
+   - performs `cd "$WORKER_ROOT"` before `npx wrangler deploy`
+   - installs deps if node_modules missing; runs `tsc --noEmit` pre-deploy
+
+dev_command:              cd worker-wb && npm run dev    ("wrangler dev")
+tail_command:             cd worker-wb && npm run tail   ("wrangler tail")
+
+prerequisites:
+   - npm install (once, from /worker-wb)
+   - wrangler login (Cloudflare account auth)
+
+----------------------------------------------------------------
+4. ASSET DIRECTORY
+----------------------------------------------------------------
+declared_in_wrangler:     "assets": { "directory": "./public" }
+resolved_asset_root:      /worker-wb/public
+present_assets:
+   /worker-wb/public/index.html     (Operator UI shell)
+   /worker-wb/public/css/
+   /worker-wb/public/js/
+notes:
+   - Wrangler Workers Assets serves /worker-wb/public/* at site root.
+   - index.html is the default served document at "/".
+
+----------------------------------------------------------------
+5. REQUIRED PUBLIC TEST ROUTES (per build sheet)
+----------------------------------------------------------------
+   /                    -> UI shell (served from /worker-wb/public/index.html via assets)
+   /health              -> Worker fetch handler (liveness probe)
+   /telegram/webhook    -> Worker fetch handler (Telegram webhook intake)
+   /session/latest      -> Worker fetch handler (UI session state surface)
+
+current_worker_handler_state:
+   /worker-wb/src/index.ts currently returns `new Response(null, { status: 404 })`
+   for all requests. Route implementations for /health, /telegram/webhook,
+   and /session/latest are owed by Stage 2 stages S2 and S3 (not CF-PREP scope).
+   CF-PREP only verifies that deployment paths and config are correct; route
+   handler wiring is declared work for subsequent stages.
+
+----------------------------------------------------------------
+6. CUSTOM DOMAIN AND WORKERS.DEV
+----------------------------------------------------------------
+workers_dev_url_pattern:  https://ali-ai.<account-subdomain>.workers.dev
+                          (derived from wrangler.jsonc "name": "ali-ai" with
+                           workers_dev: true; exact subdomain is account-bound
+                           and resolved at deploy time)
+custom_domain:            existing Stage 1 custom domain — exact hostname to be
+                          confirmed by operator from Cloudflare dashboard at
+                          deploy time (not stored in wrangler.jsonc; managed via
+                          Cloudflare Workers "Triggers / Custom Domains").
+preview_urls:             enabled (preview_urls: true in wrangler.jsonc)
+
+----------------------------------------------------------------
+7. CF-PREP VERIFICATION SUMMARY
+----------------------------------------------------------------
+deploy_root_correct:            PASS  (/worker-wb)
+wrangler_config_path_correct:   PASS  (/worker-wb/wrangler.jsonc)
+deploy_command_correct:         PASS  (cd worker-wb && npm run deploy)
+asset_directory_declared:       PASS  (./public -> /worker-wb/public)
+workers_dev_enabled:            PASS
+preview_urls_enabled:           PASS
+no_root_config_conflict:        PASS
+required_public_routes_listed:  PASS  (/, /health, /telegram/webhook, /session/latest)
+
+----------------------------------------------------------------
+8. NOTES FOR FOREMAN A / FOREMAN B
+----------------------------------------------------------------
+- Build sheet references /job_site/factory-manual-v1.1.txt; present file on
+  disk is /job_site/factory-manual-v1.11.txt (v1.11 lean). Treated as the
+  same active manual per PRECEDENCE LAW section of that manual. Flag only.
+- /job_site/stage_activity_log.txt does not yet exist; Foreman A owns the
+  required log entry "cloudflare prep complete" at CF-PREP checkpoint.
+- Access policy matrix for the four public routes is owed by Worker B
+  (artifact: /job_site/cloudflare_access_matrix.txt), out of scope here.
