@@ -1,5 +1,6 @@
 import { handleTelegramWebhook } from './routes/telegram-webhook';
 import { handleSessionLatest } from './routes/session-latest';
+import { handleHealth } from './routes/health';
 import type { TelegramEnv } from './integrations/telegram/types';
 import type { TranscriptionEnv } from './providers/transcription/provider';
 import { createLogger, extractCorrelationId } from './lib/logging';
@@ -29,6 +30,8 @@ export default {
         response = await handleTelegramWebhook(request, env, logger);
       } else if (url.pathname === '/session/latest') {
         response = handleSessionLatest(request, logger);
+      } else if (url.pathname === '/health') {
+        response = handleHealth(request, logger);
       } else {
         response = new Response(null, { status: 404 });
       }
