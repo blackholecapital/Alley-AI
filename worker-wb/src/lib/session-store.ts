@@ -12,10 +12,12 @@
 
 import type { InternalEvent } from '../integrations/telegram/types';
 
+export type SessionItemSource = 'telegram' | 'ui';
+
 export interface SessionItem {
   id: string;
   direction: 'inbound' | 'outbound';
-  source: 'telegram';
+  source: SessionItemSource;
   kind: 'text' | 'voice' | 'other';
   chat_id: number;
   message_id: number | null;
@@ -113,6 +115,61 @@ export function recordOutbound(record: OutboundRecord): SessionItem {
     username: null,
     text: record.text,
     at: record.at ?? new Date().toISOString(),
+  };
+  push(item);
+  return item;
+}
+
+// UI channel helpers. The browser operator UI does not carry a Telegram
+// chat_id/message_id and cannot present the webhook secret, so its events
+// are recorded here with source='ui' and a synthetic chat_id. These helpers
+// stay isolate-local (no network I/O, no module-top-level side effects).
+
+const UI_CHAT_ID = 0;
+
+export interface UiInboundInput {
+  text: string;
+  at?: string;
+}
+
+export function recordUiInbound(input: UiInboundInput): SessionItem {
+  ensureSessionIdentity();
+  const eventId = crypto.randomUUID();
+  const item: SessionItem = {
+    id: `in:ui:${eventId}`,
+    direction: 'inbound',
+    source: 'ui',
+    kind: 'text',
+    chat_id: UI_CHAT_ID,
+    message_id: null,
+    user_id: null,
+    username: null,
+    text: input.text,
+    at: input.at ?? new Date().toISOString(),
+  };
+  push(item);
+  return item;
+}
+
+export interface UiOutboundInput {
+  event_id: string;
+  text: string;
+  at?: string;
+}
+
+export function recordUiOutbound(input: UiOutboundInput): SessionItem {
+  ensureSessionIdentity();
+  const item: SessionItem = {
+    id: `out:ui:${input.event_id}`,
+    direction: 'outbound',
+    source: 'ui',
+    kind: 'text',
+    chat_id: UI_CHAT_ID,
+    message_id: null,
+    user_id: null,
+    username: null,
+    text: input.text,
+    at: input.at ?? new Date().toISOString(),
   };
   push(item);
   return item;
