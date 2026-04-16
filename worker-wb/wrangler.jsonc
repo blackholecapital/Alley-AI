@@ -1,6 +1,6 @@
 {
   // Cloudflare Worker configuration — worker-wb deployment root
-  // Ref: S5A.2 Cloudflare Worker runtime patch
+  // Ref: S5A.2, S5B.1 — Cloudflare Worker runtime patch + binding placeholders
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ali-ai-worker-wb",
   "main": "src/index.ts",
@@ -11,18 +11,55 @@
   // If a custom build becomes necessary, uncomment:
   // "build": { "command": "npm run build" },
 
-  // Environment bindings are injected via .dev.vars (local) or
-  // the Cloudflare dashboard (production). See .dev.vars.example.
+  // ── vars: plain-text runtime configuration ────────────────────────
+  // These are NOT secrets. Secrets go in .dev.vars (local) or
+  // `wrangler secret put` (production). See .dev.vars.example.
+  "vars": {
+    "ENVIRONMENT": "development",
+    "WORKER_VERSION": "0.1.0",
+    "LOG_LEVEL": "info",
+    "PROXY_BACKEND_URL": "http://localhost:5000"
+  },
 
-  // KV / D1 / R2 / Queues can be added here when the runtime needs them.
-  // Placeholder sections below — uncomment and configure as needed:
-
+  // ── KV Namespaces ─────────────────────────────────────────────────
+  // Session state, interaction log cache, feature flags.
+  // To provision: wrangler kv namespace create CHASSIS_KV
+  //
   // "kv_namespaces": [
   //   { "binding": "CHASSIS_KV", "id": "<kv-namespace-id>" }
   // ],
 
+  // ── D1 Databases ──────────────────────────────────────────────────
+  // Structured data: calendar events, contacts, audit trail.
+  // To provision: wrangler d1 create ali-ai-chassis
+  //
   // "d1_databases": [
-  //   { "binding": "CHASSIS_DB", "database_name": "ali-ai-chassis", "database_id": "<d1-id>" }
+  //   {
+  //     "binding": "CHASSIS_DB",
+  //     "database_name": "ali-ai-chassis",
+  //     "database_id": "<d1-database-id>"
+  //   }
+  // ],
+
+  // ── R2 Buckets ────────────────────────────────────────────────────
+  // Binary / large-object storage: voice recordings, attachments, exports.
+  // To provision: wrangler r2 bucket create ali-ai-assets
+  //
+  // "r2_buckets": [
+  //   { "binding": "ASSETS_BUCKET", "bucket_name": "ali-ai-assets" }
+  // ],
+
+  // ── Durable Objects ───────────────────────────────────────────────
+  // Stateful singletons: per-user session, conversation coordinator.
+  // Requires a DO class exported from the Worker entrypoint.
+  //
+  // "durable_objects": {
+  //   "bindings": [
+  //     { "name": "SESSION_DO", "class_name": "SessionObject" }
+  //   ]
+  // },
+  // "migrations": [
+  //   { "tag": "v1", "new_classes": ["SessionObject"] }
   // ],
 
   "observability": {
