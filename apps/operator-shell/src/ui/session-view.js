@@ -23,7 +23,13 @@
 
 'use strict';
 
+// Worker-aligned routes. The UI must NOT call /api/* — those paths do not
+// exist on the Cloudflare Worker. Inbound events are read from
+// /session/latest and outbound messages post to /telegram/webhook. Both
+// routes live on the same worker origin and return {"ok": true} on success
+// for the POST path.
 const ENDPOINT = '/session/latest';
+const SEND_ENDPOINT = '/telegram/webhook';
 const POLL_MS = 5000;
 
 const DOM = {
@@ -252,6 +258,30 @@ function stopPolling() {
   markerTimer = null;
 }
 
+// ── Outbound send ──────────────────────────────────────────────────
+// Posts to the Worker's /telegram/webhook route (the same route that
+// Telegram itself calls). The worker always returns {"ok": true} on
+// accepted posts — anything else is treated as a send failure.
+
+async function sendMessage(payload) {
+  const res = await fetch(SEND_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    return { ok: false, status: res.status };
+  }
+  const data = await res.json().catch(() => null);
+  if (!data || data.ok !== true) {
+    return { ok: false, status: res.status };
+  }
+  return { ok: true };
+}
+
 // Auto-start when loaded in a browser context.
 if (typeof window !== 'undefined') {
   if (document.readyState === 'loading') {
@@ -264,8 +294,10 @@ if (typeof window !== 'undefined') {
 // Test hooks — exported for unit harnesses; no runtime consumers.
 export {
   ENDPOINT,
+  SEND_ENDPOINT,
   POLL_MS,
   fetchOnce,
+  sendMessage,
   startPolling,
   stopPolling,
   renderLoading,

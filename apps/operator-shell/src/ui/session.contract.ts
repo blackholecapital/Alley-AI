@@ -37,3 +37,20 @@ export type UIRenderState =
   | { kind: 'empty'; session_id: string | null }
   | { kind: 'live'; data: SessionLatestResponse }
   | { kind: 'error'; message: string };
+
+// Outbound send contract. The UI posts directly to the worker's
+// /telegram/webhook route — the same route Telegram itself calls — and
+// the worker always replies with {"ok": true} on accepted updates.
+// The UI must NOT call /api/* paths; those do not exist on the worker.
+export interface TelegramWebhookAck {
+  ok: true;
+}
+
+export interface SendResultOk {
+  ok: true;
+}
+export interface SendResultErr {
+  ok: false;
+  status: number;
+}
+export type SendResult = SendResultOk | SendResultErr;
