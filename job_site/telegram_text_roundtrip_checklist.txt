@@ -1,0 +1,178 @@
+TELEGRAM TEXT ROUND-TRIP CHECKLIST — EXEC-AI-STAGE2-003 | S2 | WORKER B
+========================================================================
+Generated: 2026-04-16
+Branch:    claude/verify-cloudflare-access-oKfsP
+Companion artifact: /worker-wb/test/telegram-text-roundtrip.test.ts
+Scope:     Tests & request-fixture coverage for webhook registration,
+           inbound text handling, normalized event creation, and
+           outbound Telegram reply behavior.
+
+------------------------------------------------------------------------
+0. REFERENCES CONSULTED
+------------------------------------------------------------------------
+- /job_site/factory-manual-v1.1.txt   (present as factory-manual-v1.11.txt)
+- /job_site/worker-execution-manual-v1.1.txt
+- /job_site/build-sheet-EXEC-AI-STAGE2-003.txt
+- reference_materials block in build sheet (substitutes for missing
+  /job_site/reference_repo_matrix.txt — noted under ISSUES below):
+    * grammyjs/grammY             — Telegram Bot Framework
+    * m-sarabi/cloudflare-telegram-bot — CF Workers + Telegram TS structure
+    * cvzi/telegram-bot-cloudflare    — minimal webhook echo pattern
+    * deepgram/examples               — CF Worker transcription (S4, not S2)
+    * openclaw/openclaw               — session/event-flow patterns
+
+------------------------------------------------------------------------
+1. DECLARED CONTRACT PATHS (under test)
+------------------------------------------------------------------------
+Worker A S2 expected artifacts (build sheet):
+    /worker-wb/src/integrations/telegram/inbound.ts     — inbound normaliser
+    /worker-wb/src/integrations/telegram/outbound.ts    — outbound sender
+    /worker-wb/src/integrations/telegram/types.ts       — shared types
+    /worker-wb/src/routes/telegram-webhook.ts           — /telegram/webhook
+
+Public route (build sheet required_public_test_routes):
+    /telegram/webhook  — POST, JSON body, Telegram update payload
+
+------------------------------------------------------------------------
+2. TEST / FIXTURE COVERAGE MATRIX
+------------------------------------------------------------------------
+
+Area 1 — Webhook registration
+  fixture:    WEBHOOK_REGISTRATION_FIXTURE
+  verifies:   setWebhook URL ends with "/telegram/webhook"
+              allowed_updates is ["message"] (S2 scope: text only)
+              secret_token is non-empty (Worker must validate
+              X-Telegram-Bot-Api-Secret-Token on every inbound)
+  test id:    "webhook registration targets /telegram/webhook path"
+
+Area 2 — Inbound text handling
+  fixtures:   INBOUND_TEXT_UPDATE_FIXTURE         (happy path)
+              INBOUND_NON_TEXT_UPDATE_FIXTURE     (sticker, must ack 200)
+              INBOUND_WEBHOOK_REQUEST_FIXTURE     (HTTP envelope Telegram sends)
+  verifies:   message.text / chat.id / from.id / update_id present
+              X-Telegram-Bot-Api-Secret-Token header present on inbound
+              non-text update has no text key and must NOT crash the Worker
+  test ids:   "inbound text update carries the fields the Worker must read"
+              "inbound webhook request declares secret-token header"
+              "non-text inbound update is acceptable shape (must 200-ack, not 500)"
+
+Area 3 — Normalized event creation
+  fixture:    NORMALIZED_TEXT_EVENT_FIXTURE
+  required keys: kind, direction, channel, session_id, user_id, text,
+                 source, received_at_ms
+  verifies:   session_id == "telegram:<chat.id>"
+              user_id    == "telegram:<from.id>"
+              text       passes through verbatim
+              source.update_id / source.message_id mirror Telegram's ids
+  test ids:   "normalized event exposes every required contract key"
+              "normalized event preserves Telegram identifiers"
+
+Area 4 — Outbound Telegram reply behavior
+  fixture:    OUTBOUND_REPLY_FIXTURE
+  verifies:   endpoint ends with "/sendMessage"
+              reply body.chat_id equals inbound message.chat.id
+              (round-trip chat-identity preserved)
+              reply body.text is a non-empty string
+  test ids:   "outbound reply routes to Telegram sendMessage for the same chat"
+              "round-trip integrity: inbound chat.id == outbound chat_id"
+
+------------------------------------------------------------------------
+3. RUNNING THE TESTS
+------------------------------------------------------------------------
+Self-contained assertion harness — no new devDependency added.
+
+  Option A — direct (Node 22+ with TS strip types):
+      node --experimental-strip-types \
+        worker-wb/test/telegram-text-roundtrip.test.ts
+
+  Option B — any TS-aware runner once Worker A ships S2 modules:
+      npx vitest run worker-wb/test/telegram-text-roundtrip.test.ts
+    or
+      node --test --import tsx worker-wb/test/telegram-text-roundtrip.test.ts
+
+Fixtures are exported named constants; they remain canonical when the
+runner is later swapped for a real framework. When Worker A's S2
+files land, this file should be upgraded to import the real handler
+and swap contract-shape checks for live behavior checks — fixtures
+stay unchanged.
+
+------------------------------------------------------------------------
+4. LIVE-PATH MANUAL VERIFICATION STEPS (post-deploy, operator)
+------------------------------------------------------------------------
+Prereqs:
+  * Worker deployed from /worker-wb to workers.dev (per CF-PREP report).
+  * TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET set via
+    `wrangler secret put` in the /worker-wb context.
+
+Step 1 — register the webhook
+  curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+    -d "url=https://ali-ai.<account>.workers.dev/telegram/webhook" \
+    -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}" \
+    -d 'allowed_updates=["message"]'
+  Expect: {"ok":true,"result":true, ...}
+
+Step 2 — confirm registration
+  curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo"
+  Expect: url matches step 1; pending_update_count == 0;
+          last_error_message empty/absent.
+
+Step 3 — send a text message from Telegram to the bot
+  Action: in Telegram client, send "hello" to the bot.
+  Expect: Worker receives POST /telegram/webhook with a valid
+          X-Telegram-Bot-Api-Secret-Token; Worker responds 200;
+          operator sees bot reply in Telegram client within a few seconds.
+
+Step 4 — confirm normalized event on the UI surface (shared with S3)
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest"
+  Expect: response includes a "message" event whose
+          channel == "telegram", direction == "inbound",
+          text == "hello", session_id == "telegram:<chat.id>".
+
+Step 5 — negative path (non-text update)
+  Action: send a sticker or voice note from Telegram.
+  Expect (S2 scope): Worker returns 200 (ack) without crashing; no
+          text reply required — voice handling lives in S4.
+
+------------------------------------------------------------------------
+5. ACCEPTANCE GATES (for S2 checkpoint)
+------------------------------------------------------------------------
+PASS conditions:
+  [ ] /worker-wb/test/telegram-text-roundtrip.test.ts exists with all
+      four coverage areas represented.
+  [ ] /job_site/telegram_text_roundtrip_checklist.txt exists (this file).
+  [ ] Fixture set matches Telegram Bot API contract exactly.
+  [ ] session_id / user_id derivation rule documented as
+      "telegram:<id>" and the test asserts it.
+  [ ] Outbound chat_id == inbound chat.id asserted in tests.
+  [ ] repo mirrored, committed, pushed to designated branch.
+
+PATCH conditions (any one fails):
+  [ ] fixture missing for any of webhook / inbound / normalized / outbound.
+  [ ] required normalized-event key absent from contract list.
+  [ ] outbound path wired to something other than sendMessage.
+  [ ] round-trip chat-identity invariant not asserted.
+
+------------------------------------------------------------------------
+6. ISSUES / FLAGS (for Foreman A and Foreman B awareness)
+------------------------------------------------------------------------
+- /job_site/reference_repo_matrix.txt (S1 required_stage_artifact) is
+  not present on main and was not produced in S1. This file substitutes
+  by inlining the build sheet's own `reference_materials` block (§0).
+  Foreman A should still generate the S1 matrix before CF-TEST.
+- Worker A's S2 implementation files (inbound.ts / outbound.ts /
+  types.ts / telegram-webhook.ts) are not present at commit time. Tests
+  and fixtures are written at the contract level so they do not depend
+  on Worker A's shipped code — they describe the shape Worker A must
+  satisfy. When Worker A lands, this file should be upgraded to import
+  the real modules and call the route handler directly.
+- Current /worker-wb/src/index.ts is still the Stage-1 404 stub; live
+  path verification (§4) will fail until Worker A's S2 handler ships.
+
+------------------------------------------------------------------------
+7. ARTIFACT SELF-CHECK
+------------------------------------------------------------------------
+expected_artifact_1: /worker-wb/test/telegram-text-roundtrip.test.ts  — present
+expected_artifact_2: /job_site/telegram_text_roundtrip_checklist.txt  — present (this file)
+repo_mirror_required: yes — written to /home/user/ALI-ai working tree
+commit_required:      yes — committed on claude/verify-cloudflare-access-oKfsP
+push_required:        yes — pushed to origin
