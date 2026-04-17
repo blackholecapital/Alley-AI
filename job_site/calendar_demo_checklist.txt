@@ -1,0 +1,265 @@
+CALENDAR DEMO CHECKLIST — EXEC-AI-STAGE3-004 | S4 | WORKER B
+=============================================================
+Generated: 2026-04-17
+Branch:    claude/add-calendar-tests-SEgMz
+Companion: /worker-wb/test/calendar-single-action.test.ts
+           /job_site/calendar_failure_modes.txt
+Scope:     Exact operator proof steps for ONE live calendar command
+           (CALENDAR_LIST_TODAY) and the required negative-path probes
+           proving safe failure when provider config or permissions are
+           missing.
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/worker-execution-manual-v1.1.txt
+- /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+- /worker-wb/src/integrations/calendar/index.ts
+- /worker-wb/src/integrations/calendar/provider.ts
+- /worker-wb/src/routes/calendar-status.ts
+- /worker-wb/src/lib/action-router.ts
+
+NOTE: /job_site/factory-manual-v1.1.txt is present on disk as
+      /job_site/factory-manual-v1.11.txt (v1.11 lean). Treated as
+      the same active manual per PRECEDENCE LAW; flag only.
+
+----------------------------------------------------------
+1. STAGE 3 S4 CONTRACT
+----------------------------------------------------------
+Build sheet S4 goal:
+  "Add one reliable calendar action and no more."
+
+Stage 3 S4 contract pinned by this checklist + companion test:
+
+  C1. Exactly ONE action is registered in the router:
+      CALENDAR_LIST_TODAY ("calendar.list_today").
+      No create, no update, no delete, no second action.
+
+  C2. Happy path (CALENDAR_PROVIDER=demo):
+      dispatch → ok=true, reply_text with event list,
+      payload carries provider/window/events/event_count.
+
+  C3. Failure path (no CALENDAR_PROVIDER, or unsupported value):
+      dispatch → ok=false, reply_text is the canned human-readable
+      message naming the env var the operator must set.
+      Handler does NOT throw; webhook stays up.
+
+  C4. Runtime status route: GET /calendar/status
+      - no ?run: returns provider readiness, no side effects.
+      - ?run=1:  dispatches the action, returns invocation result.
+      Both variants return HTTP 200 whether the provider is ready or not.
+
+----------------------------------------------------------
+2. AUTOMATED TEST COVERAGE MATRIX
+----------------------------------------------------------
+File: /worker-wb/test/calendar-single-action.test.ts
+Run:  cd worker-wb && node --experimental-strip-types \
+        test/calendar-single-action.test.ts
+
+Areas covered:
+  A. Scope lock
+       CALENDAR_LIST_TODAY constant value
+       registerCalendarActions registers exactly one action
+       create/update/delete NOT registered
+
+  B. Happy path — DemoCalendarProvider (C2)
+       demo provider ready=true
+       dispatch returns ok=true, non-empty reply_text
+       payload has provider, window, events, event_count
+       3 seed events anchored to today, all confirmed
+       reply_text shows bullet lines, plural header, locations
+       distinct dates produce distinct event timestamps
+
+  C. Failure — provider not configured (C3)
+       UnconfiguredCalendarProvider ready=false
+       dispatch returns ok=false, non-empty reply_text
+       reply_text names CALENDAR_PROVIDER env var
+       error.code = "provider_not_ready"
+       dispatch does NOT throw
+
+  D. Failure — unknown action type dispatched
+       ok=false, error.code = "unknown_action"
+
+  E. Failure — unsupported provider name
+       ok=false, reply_text references "supported"
+       does NOT throw
+
+  F. Safety invariants
+       dispatch never throws (demo, none/empty, unconfigured)
+       handled_at always present as ISO string
+
+  G. formatScheduleReply contract
+       empty event list → "clear" message
+       single event → singular header
+       ok=false → canned reason message (all 5 reasons)
+       location appended when present
+
+  H. parseTimezoneOffset contract
+       missing/empty → 0; valid integer → parsed; out-of-range → 0;
+       non-numeric → 0
+
+  I. Calendar status route (C4)
+       GET without ?run → 200, invocation=null
+       GET ?run=1 demo → 200, invocation.ok=true
+       GET ?run=1 unconfigured → 200, invocation.ok=false, no throw
+       POST → 405
+       HEAD → 200, no body
+
+----------------------------------------------------------
+3. PRE-FLIGHT (operator)
+----------------------------------------------------------
+Required before live demo:
+
+  [ ] Worker deployed from /worker-wb to *.workers.dev
+      Deploy command: cd worker-wb && npm run deploy
+      Confirm deploy root is /worker-wb (per cloudflare_prep_report.txt).
+
+  [ ] /calendar/status route is publicly accessible (not blocked by
+      Cloudflare Access). Route listed in required_public_test_routes.
+      Check: curl -I https://ali-ai.<account>.workers.dev/calendar/status
+      Expect: HTTP/1.1 200 (not 302 to Access login).
+
+  [ ] To run the happy-path demo set the following secret:
+        wrangler secret put CALENDAR_PROVIDER   (value: "demo")
+      The demo provider requires NO external API key — it returns
+      deterministic seed events anchored to today's date.
+
+  [ ] To run the failure-path demo either:
+      (a) leave CALENDAR_PROVIDER unset (defaults to unconfigured), or
+      (b) set CALENDAR_PROVIDER to an unsupported name (e.g. "google").
+
+  [ ] Operator UI open at the Worker root ("/").
+  [ ] /session/latest and /health reachable (200 JSON, not 302).
+
+----------------------------------------------------------
+4. HAPPY-PATH PROOF STEPS — ONE CALENDAR COMMAND
+----------------------------------------------------------
+Capture all curl outputs and note them in
+/job_site/cloudflare_test_evidence_index.txt when CF-TEST opens.
+
+Step 1 — verify provider readiness
+  curl -s "https://ali-ai.<account>.workers.dev/calendar/status" \
+    | jq '{provider: .provider, action: .action, invocation: .invocation}'
+
+  Expect:
+    provider.ready  = true
+    provider.provider = "demo"
+    action.action_type = "calendar.list_today"
+    action.registered  = true
+    invocation = null   (no ?run so no side effects)
+
+Step 2 — dispatch the single calendar action via ?run=1
+  curl -s "https://ali-ai.<account>.workers.dev/calendar/status?run=1" \
+    | jq '{ok: .invocation.ok,
+           reply_text: .invocation.reply_text,
+           event_count: .invocation.payload.event_count}'
+
+  Expect:
+    ok           = true
+    event_count  = 3
+    reply_text   — non-empty string listing today's 3 demo events
+                   (Team standup / Product review / 1:1 with Alex)
+                   with "•" bullet markers and hh:mm–hh:mm time ranges
+
+Step 3 — verify the operator UI shows the event trail
+  In the operator shell confirm:
+    [ ] calendar status pane shows provider=demo, ready=true
+    [ ] last action result shows ok=true, 3 events
+    [ ] event titles visible in the result surface
+
+Step 4 — capture evidence
+  [ ] curl output from Step 1 (provider readiness, no run)
+  [ ] curl output from Step 2 (action dispatch, ok=true)
+  [ ] UI screenshot showing calendar status / action result
+
+----------------------------------------------------------
+5. FAILURE-PATH PROOFS (REQUIRED FOR S4 CHECKPOINT)
+----------------------------------------------------------
+At least ONE failure mode below MUST be exercised live and captured.
+
+5A. Provider not configured (cheapest — no secret needed)
+
+  Setup: ensure CALENDAR_PROVIDER is unset or set to empty/none.
+  (If demo is already set: wrangler secret put CALENDAR_PROVIDER
+   then leave it blank or set it to "none".)
+
+  curl -s "https://ali-ai.<account>.workers.dev/calendar/status?run=1" \
+    | jq '{provider: .provider,
+           invocation_ok: .invocation.ok,
+           invocation_reply: .invocation.reply_text,
+           error_code: .invocation.error.code}'
+
+  Expect:
+    provider.ready        = false
+    provider.reason       = "provider_not_configured"
+    invocation_ok         = false
+    error_code            = "provider_not_ready"
+    invocation_reply      — human-readable string mentioning
+                            "calendar connected" and "CALENDAR_PROVIDER"
+    HTTP status           = 200 (route never throws)
+
+5B. Unsupported provider name
+
+  Setup: wrangler secret put CALENDAR_PROVIDER  (value: "google")
+
+  curl -s "https://ali-ai.<account>.workers.dev/calendar/status?run=1" \
+    | jq '{provider: .provider, invocation: .invocation}'
+
+  Expect:
+    provider.ready        = false
+    provider.reason       = "provider_unsupported"
+    invocation.ok         = false
+    invocation.reply_text — references "supported" (tells operator
+                            to use a known provider)
+    HTTP status           = 200
+
+  After verifying, restore CALENDAR_PROVIDER to "demo" for the
+  happy-path step 4 evidence capture.
+
+----------------------------------------------------------
+6. ACCEPTANCE GATES (for S4 checkpoint)
+----------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] /worker-wb/test/calendar-single-action.test.ts exists and all
+      cases pass locally.
+  [ ] /job_site/calendar_failure_modes.txt is present.
+  [ ] /job_site/calendar_demo_checklist.txt exists (this file).
+  [ ] GET /calendar/status returns HTTP 200 whether provider is ready
+      or not.
+  [ ] ?run=1 with CALENDAR_PROVIDER=demo returns invocation.ok=true,
+      event_count=3, non-empty reply_text.
+  [ ] ?run=1 with no provider returns invocation.ok=false, human-
+      readable reply_text naming CALENDAR_PROVIDER.
+  [ ] Exactly ONE action type is registered (no scope creep).
+  [ ] Repo mirrored, committed, pushed to designated branch.
+
+PATCH conditions (any one fails):
+  [ ] /calendar/status throws or returns non-200 on either path.
+  [ ] invocation.reply_text is empty, missing, or a raw stack trace.
+  [ ] More than one calendar action type is registered.
+  [ ] Scope expanded to create/update/delete.
+  [ ] Failure path causes an uncaught exception in the Worker isolate.
+  [ ] Provider config ambiguity is not clearly reported to operator.
+
+----------------------------------------------------------
+7. ISSUES / FLAGS
+----------------------------------------------------------
+- Build sheet cites /job_site/factory-manual-v1.1.txt; file on disk is
+  /job_site/factory-manual-v1.11.txt (v1.11 lean). Same active manual
+  per PRECEDENCE LAW. Flag only.
+- The test file imports directly from src/ and requires the Worker A S4
+  implementation files to be present and compilable. If Worker A's push
+  has not landed, run the tests against a local branch merge first.
+- The demo provider (CALENDAR_PROVIDER=demo) requires NO external API
+  key. It is the correct choice for the S4 checkpoint demo. Real
+  provider wiring (Google Calendar, etc.) is out of Stage 3 scope.
+
+----------------------------------------------------------
+8. ARTIFACT SELF-CHECK
+----------------------------------------------------------
+expected_artifact_1: /worker-wb/test/calendar-single-action.test.ts — present
+expected_artifact_2: /job_site/calendar_demo_checklist.txt           — present (this file)
+expected_artifact_3: /job_site/calendar_failure_modes.txt             — present
+repo_mirror_required: yes — written to /home/user/ALI-ai working tree
+commit_required:      yes — to be committed on claude/add-calendar-tests-SEgMz
+push_required:        yes — to be pushed to origin
