@@ -1,0 +1,223 @@
+VOICE FAILURE MODES — BROWSER LAYER
+EXEC-AI-STAGE4-001 | S3 | WORKER B3.1
+======================================================
+Generated: 2026-04-17
+Scope:     Browser-layer failure modes only.
+           Covers: permission_denied, unsupported_browser, recording_cancelled.
+           Excludes: backend pipeline, transcription, media fetch, and
+                     telegram roundtrip failures (see voice_failure_modes.txt).
+Companion: /apps/operator-shell/src/ui/voice-capture.js
+           /job_site/voice_capture_contract.txt
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/voice_capture_contract.txt
+- /apps/operator-shell/src/ui/voice-capture.js
+
+----------------------------------------------------------
+1. BROWSER-LAYER STATE MACHINE (summary)
+----------------------------------------------------------
+The voice-capture.js module drives an 8-state machine:
+
+  idle → requesting → recording → processing → sent → idle
+                   ↘ denied  (permission refused)
+                   ↘ error   (unexpected runtime failure)
+  idle → unsupported           (API absent at page load)
+
+Only the three terminal-or-redirect states below constitute
+failure modes at the browser layer. All three guarantee:
+  - the mic stream is stopped (getTracks().stop()) if one was opened
+  - the UI button is returned to a usable state or permanently disabled
+  - no audio data is sent to the backend
+
+----------------------------------------------------------
+2. FAILURE MODES
+----------------------------------------------------------
+
+────────────────────────────────────────────────────────
+Mode: permission_denied
+────────────────────────────────────────────────────────
+  State machine state:  denied
+
+  Triggers:
+    a) User rejects the browser permission prompt
+         Error name: NotAllowedError  OR  PermissionDeniedError
+    b) OS-level mic access blocked (no hardware prompt shown)
+         Error name: NotAllowedError
+    c) No microphone device found
+         Error name: NotFoundError  OR  DevicesNotFoundError
+         UI detail:  "No microphone found."
+    d) Page served over plain HTTP (getUserMedia unavailable)
+         Likely manifests as NotAllowedError or absence of
+         navigator.mediaDevices — may fall through to unsupported_browser
+         if the API itself is missing, or to permission_denied if the
+         browser blocks silently rather than omitting the API.
+
+  Gate location:
+    voice-capture.js startCapture() — catch block on
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+
+  Stream state:
+    getUserMedia rejected before a stream was opened; nothing to stop.
+
+  UI contract:
+    - Talk button re-enabled (retry allowed)
+    - State transitions: requesting → denied
+    - onStateChange callback fires with ('denied', null) for cases a/b,
+      or ('denied', { message: 'No microphone found.' }) for case c.
+    - Clear error message displayed; no audio data leaves the browser.
+
+  Retry behaviour:
+    startCapture() accepts calls from the 'denied' state, re-entering
+    'requesting'. The operator may retry without reloading the page,
+    but a browser-level permanent block (user ticked "never allow")
+    will produce the same error on every retry until the user changes
+    browser site settings.
+
+  What does NOT happen:
+    - No audio blob is constructed.
+    - No POST to /voice/capture.
+    - The state never advances to 'processing' or 'sent'.
+
+────────────────────────────────────────────────────────
+Mode: unsupported_browser
+────────────────────────────────────────────────────────
+  State machine state:  unsupported
+
+  Trigger:
+    At least one of the following conditions is false when
+    startCapture() is called (checked by isSupported()):
+      navigator.mediaDevices != null
+      typeof navigator.mediaDevices.getUserMedia === 'function'
+      typeof MediaRecorder !== 'undefined'
+
+  Common causes:
+    - Legacy browser (IE, old mobile WebView) missing MediaRecorder
+    - Page served over plain HTTP: getUserMedia removed from
+      navigator.mediaDevices by the browser in non-secure context
+      (Chrome ≥ 47, Firefox ≥ 68, Edge equivalent)
+    - Embedded WebView with restricted APIs (some Electron, Cordova,
+      or custom shells strip MediaRecorder)
+
+  Gate location:
+    voice-capture.js startCapture() — isSupported() check at entry,
+    before any async call.
+
+  Stream state:
+    No stream is ever requested; nothing to stop.
+
+  UI contract:
+    - State transitions: (any state) → unsupported
+    - onStateChange callback fires with ('unsupported', null).
+    - Talk button permanently disabled for the page session.
+    - Informational message shown (e.g. "Voice capture is not supported
+      in this browser. Please use Chrome, Firefox, or Edge over HTTPS.").
+    - No retry possible within the page session; user must switch browser
+      or reload over HTTPS.
+
+  What does NOT happen:
+    - getUserMedia is never called.
+    - No audio data is ever collected.
+    - No POST to /voice/capture.
+
+────────────────────────────────────────────────────────
+Mode: recording_cancelled
+────────────────────────────────────────────────────────
+  State machine state:  idle  (returns to idle, not an error state)
+
+  Trigger:
+    Operator clicks "Cancel" during active recording — calls
+    cancelCapture() while state === 'recording'.
+
+  Gate location:
+    voice-capture.js cancelCapture()
+
+  Stream state:
+    MediaRecorder is stopped (if not already inactive), then
+    _stopStream() halts all mic tracks. Accumulated _chunks are
+    discarded. _recorder is nulled.
+
+  UI contract:
+    - State transitions: recording → idle
+    - onStateChange callback fires with ('idle', null).
+    - Talk button re-enabled immediately.
+    - No status message or error badge; the UI returns to its default
+      ready state as if no recording was attempted.
+    - Retry is immediate: startCapture() can be called again.
+
+  What does NOT happen:
+    - No audio blob is constructed (chunks discarded).
+    - No POST to /voice/capture.
+    - The state never reaches 'processing' or 'sent'.
+
+  Edge cases:
+    cancelCapture() is safe to call from any state. If called from
+    'idle', 'unsupported', 'denied', or 'error', it is a no-op that
+    transitions (or stays) at idle without side effects. If called
+    during 'processing' (upload in flight), the upload completes
+    normally — cancelCapture does not abort an in-flight fetch.
+
+----------------------------------------------------------
+3. DECISION FLOW (browser layer, startCapture path)
+----------------------------------------------------------
+
+  startCapture() called
+    │
+    ├─ isSupported() = false ──────────────────► unsupported_browser
+    │                                             (permanent, page reload required)
+    │
+    ├─ state not in {idle, denied, error} ──────► no-op (return)
+    │
+    └─ enter 'requesting'
+         │
+         ├─ getUserMedia resolves ──────────────► recording (normal path)
+         │
+         ├─ NotAllowedError / PermissionDeniedError ──► permission_denied (retry ok)
+         ├─ NotFoundError / DevicesNotFoundError ─────► permission_denied (retry ok,
+         │                                              "No microphone found." detail)
+         └─ any other rejection ──────────────────────► error state (retry ok)
+
+  While in 'recording':
+    ├─ stopAndSend() called ──────────────────────► processing → sent → idle
+    └─ cancelCapture() called ───────────────────► recording_cancelled → idle
+
+----------------------------------------------------------
+4. SAFETY INVARIANTS (browser layer)
+----------------------------------------------------------
+B-1  The mic stream (MediaStream) MUST be stopped in every exit path.
+     getTracks().stop() is called in: stopAndSend, cancelCapture, and
+     the MediaRecorder-init-failure branch. getUserMedia errors produce
+     no stream; no stop needed.
+
+B-2  No audio data is sent to the backend on any failure path.
+     permission_denied, unsupported_browser, and recording_cancelled
+     all discard or never collect audio chunks.
+
+B-3  The UI MUST NOT be left in a permanently disabled or unresponsive
+     state after a retriable failure. permission_denied and error states
+     re-enable the Talk button. Only unsupported_browser permanently
+     disables it (the condition is structural, not transient).
+
+B-4  onStateChange is called exactly once per state transition.
+     No duplicate callbacks. Extra field is null unless there is a
+     message to display (e.g. "No microphone found.").
+
+----------------------------------------------------------
+5. OUT OF SCOPE FOR THIS DOCUMENT
+----------------------------------------------------------
+The following failure modes belong to the backend layer and are
+documented in /job_site/voice_failure_modes.txt:
+
+  - media_fetch_failed       (Telegram getFile / download)
+  - transcription_failed     (STT provider non-2xx)
+  - transcription_timeout    (STT provider exceeded deadline)
+  - transcription_empty      (provider returned 200, no speech)
+  - unsupported_media        (no voice field in Telegram update)
+  - payload_too_large        (file_size > 20 MiB cap)
+  - pipeline failure (STT/core/TTS exception in voice_pipeline.py)
+
+Upload-level errors produced by the browser's fetch() call
+(HTTP non-2xx from /voice/capture, network rejection, bad JSON body)
+are surfaced as ok=false in the 'sent' state and are classified as
+backend boundary errors, not browser-layer failures.
