@@ -1,11 +1,11 @@
-CLOUDFLARE PREP REPORT — EXEC-AI-STAGE3-004 | CF-PREP | WORKER A
+CLOUDFLARE PREP REPORT — EXEC-AI-STAGE4-001 | CF-PREP | WORKER A
 ================================================================
 Generated: 2026-04-17
-Branch:    claude/verify-cloudflare-deploy-config-ZViq8
-Stage:     CF-PREP (Cloudflare Deployment Prep)
+Branch:    claude/verify-worker-config-QNaAb
+Stage:     CF-PREP (Cloudflare Deployment Prep Refresh)
 Task:      Verify exact deploy root, wrangler path, deploy command,
-           and required public routes for Stage 3. Record only
-           current-valid Cloudflare paths and commands.
+           public routes, and current asset path assumptions from
+           /worker-wb. Record only current-valid values.
 
 ----------------------------------------------------------------
 1. DEPLOY ROOT
@@ -20,8 +20,8 @@ repo_root_conflict_check:
    /home/user/ALI-ai/wrangler.jsonc  : NOT FOUND
    /home/user/ALI-ai/wrangler.json   : NOT FOUND
    /home/user/ALI-ai/package.json    : NOT FOUND
-conclusion: no repo-root config can override the /worker-wb
-            wrangler context. Deploy root is unambiguous.
+conclusion: no repo-root config overrides the /worker-wb wrangler
+            context. Deploy root is unambiguous.
 
 ----------------------------------------------------------------
 2. WRANGLER CONFIG PATH
@@ -32,35 +32,29 @@ key_fields (current):
    name                 = "ali-ai"
    main                 = "src/index.ts"        (resolves to /worker-wb/src/index.ts)
    compatibility_date   = "2025-04-01"
-   compatibility_flags  = ["nodejs_compat"]
-   workers_dev          = true                  (matches build sheet: workers_dev_required yes)
-   preview_urls         = true                  (matches build sheet: preview_urls_required yes)
+   compatibility_flags  = not declared
+   workers_dev          = true
+   preview_urls         = true
    assets.directory     = "./public"            (resolves to /worker-wb/public)
    observability.enabled= true
    vars                 = ENVIRONMENT, WORKER_VERSION, LOG_LEVEL, PROXY_BACKEND_URL
 build_block:          none declared — wrangler bundles TypeScript natively
-                      (matches build sheet: "wrangler-managed TypeScript bundle")
-kv_namespaces / d1_databases / r2_buckets / durable_objects:
-                      all commented-out placeholders; no live bindings
-                      provisioned at this stage.
+kv_namespaces:        commented-out placeholder; no live binding provisioned
+d1_databases:         commented-out placeholder; no live binding provisioned
+r2_buckets:           commented-out placeholder; no live binding provisioned
+durable_objects:      commented-out placeholder; no live binding provisioned
 
 ----------------------------------------------------------------
 3. DEPLOY COMMAND
 ----------------------------------------------------------------
-canonical_deploy_command: cd worker-wb && npm run deploy
+canonical_deploy_command: cd /worker-wb && npm run deploy
 npm_script_definition:    "deploy": "wrangler deploy"
                           (declared in /worker-wb/package.json)
 wrangler_version_pinned:  ^4.83.0 (devDependency)
 
-alternative_invocation:
-   ./worker-wb/scripts/deploy_worker.sh
-   - resolves WORKER_ROOT = /worker-wb via script-relative path
-   - performs `cd "$WORKER_ROOT"` before `npx wrangler deploy`
-   - installs deps if node_modules missing; runs `tsc --noEmit` pre-deploy
-
-dev_command:              cd worker-wb && npm run dev     ("wrangler dev")
-tail_command:             cd worker-wb && npm run tail    ("wrangler tail")
-typecheck_command:        cd worker-wb && npm run typecheck ("tsc --noEmit")
+dev_command:              cd /worker-wb && npm run dev     ("wrangler dev")
+tail_command:             cd /worker-wb && npm run tail    ("wrangler tail")
+typecheck_command:        cd /worker-wb && npm run typecheck ("tsc --noEmit")
 
 prerequisites:
    - npm install (once, from /worker-wb)
@@ -72,94 +66,71 @@ prerequisites:
 declared_in_wrangler:     "assets": { "directory": "./public" }
 resolved_asset_root:      /worker-wb/public
 present_assets:
-   /worker-wb/public/index.html     (Operator UI shell)
-   /worker-wb/public/css/           (stylesheet bundle)
-   /worker-wb/public/js/            (app.js — fetches /session/latest)
+   /worker-wb/public/index.html       (Operator UI shell)
+   /worker-wb/public/css/style.css    (stylesheet bundle)
+   /worker-wb/public/js/app.js        (app logic; fetches /session/latest)
 notes:
    - Wrangler Workers Assets serves /worker-wb/public/* at site root.
    - index.html is the default served document at "/".
-   - app.js is now aligned to the /session/latest route contract
-     (Stage 2 legacy /api/status + /api/message drift resolved).
+   - No build step required; wrangler bundles TypeScript natively.
 
 ----------------------------------------------------------------
-5. REQUIRED PUBLIC TEST ROUTES (per Stage 3 build sheet)
+5. CURRENT PUBLIC ROUTES
 ----------------------------------------------------------------
-   /                    -> UI shell (served from /worker-wb/public/index.html via assets)
-   /health              -> Worker fetch handler — WIRED (routes/health.ts)
-   /telegram/webhook    -> Worker fetch handler — WIRED (routes/telegram-webhook.ts)
-   /session/latest      -> Worker fetch handler — WIRED (routes/session-latest.ts)
-   /calendar/status     -> Worker fetch handler — NOT WIRED (Stage 4 S4)
+Route handler map (from /worker-wb/src/index.ts, current state):
 
-current_worker_handler_map (/worker-wb/src/index.ts):
-   url.pathname === '/telegram/webhook'  -> handleTelegramWebhook
-   url.pathname === '/session/latest'    -> handleSessionLatest
-   url.pathname === '/health'            -> handleHealth
-   url.pathname === '/ui/send'           -> handleUiSend (Stage 2 UI round-trip)
-   default                               -> 404
+   /                    -> static asset (served from /worker-wb/public/index.html
+                           via assets.directory binding)
+   /health              -> handleHealth          (routes/health.ts)        WIRED
+   /telegram/webhook    -> handleTelegramWebhook (routes/telegram-webhook.ts) WIRED
+   /session/latest      -> handleSessionLatest   (routes/session-latest.ts)  WIRED
+   /calendar/status     -> handleCalendarStatus  (routes/calendar-status.ts) WIRED
+   /ui/send             -> handleUiSend          (routes/ui-send.ts)         WIRED
+   default              -> 404
 
-calendar_status_gap_note:
-   /calendar/status is declared as a Stage 3 required public test route
-   in the build sheet but has no handler in src/index.ts and no
-   /worker-wb/src/routes/calendar-status.ts yet. That handler is
-   explicitly owed by Stage S4 (Single calendar action) per the build
-   sheet worker_a expected_artifacts:
-       /worker-wb/src/integrations/calendar/index.ts
-       /worker-wb/src/integrations/calendar/provider.ts
-       /worker-wb/src/routes/calendar-status.ts
-       /worker-wb/src/lib/action-router.ts
-   CF-PREP scope is verification only — no wiring performed here.
+all_five_stage4_required_routes_wired: PASS
+   /  /health  /telegram/webhook  /session/latest  /calendar/status
+   all handlers present in src/index.ts and corresponding route files exist.
 
 ----------------------------------------------------------------
 6. CUSTOM DOMAIN AND WORKERS.DEV
 ----------------------------------------------------------------
 workers_dev_url_pattern:  https://ali-ai.<account-subdomain>.workers.dev
-                          (derived from wrangler.jsonc "name": "ali-ai"
-                           with workers_dev: true; exact subdomain is
-                           account-bound and resolved at deploy time)
-custom_domain:            existing Stage 1/Stage 2 live custom domain;
-                          hostname not stored in wrangler.jsonc — managed
-                          via Cloudflare Workers "Triggers / Custom
-                          Domains". Operator to confirm at deploy time.
+                          (derived from "name": "ali-ai" with workers_dev: true;
+                           exact subdomain resolved at deploy time)
+custom_domain:            managed via Cloudflare Workers Triggers / Custom Domains;
+                          hostname not stored in wrangler.jsonc. Operator to
+                          confirm at deploy time.
 preview_urls:             enabled (preview_urls: true in wrangler.jsonc)
+access_gate_note:         workers.dev URL is not gated by Cloudflare Access.
+                          Custom-domain routes may be gated; use workers.dev
+                          or a Bypass policy for runtime testing.
 
 ----------------------------------------------------------------
 7. CF-PREP VERIFICATION SUMMARY
 ----------------------------------------------------------------
 deploy_root_correct:                 PASS  (/worker-wb)
 wrangler_config_path_correct:        PASS  (/worker-wb/wrangler.jsonc)
-deploy_command_correct:              PASS  (cd worker-wb && npm run deploy)
+deploy_command_correct:              PASS  (cd /worker-wb && npm run deploy)
 asset_directory_declared:            PASS  (./public -> /worker-wb/public)
+asset_files_present:                 PASS  (index.html, css/style.css, js/app.js)
 workers_dev_enabled:                 PASS
 preview_urls_enabled:                PASS
 no_root_config_conflict:             PASS
-required_public_routes_listed:       PASS  (5 routes recorded)
-required_public_routes_all_wired:    PATCH-NOTE
-                                     /calendar/status is declared but
-                                     not implemented. Wiring is owed by
-                                     Stage S4; not a CF-PREP blocker
-                                     since CF-PREP scope is verification
-                                     of paths and commands only.
+required_public_routes_listed:       PASS  (5 routes + /ui/send recorded)
+required_public_routes_all_wired:    PASS  (all 5 Stage 4 required routes wired;
+                                           /calendar/status now implemented,
+                                           resolving Stage 3 gap)
 
 ----------------------------------------------------------------
-8. NOTES FOR FOREMAN A / FOREMAN B
+8. NOTES
 ----------------------------------------------------------------
-- Build sheet references /job_site/factory-manual-v1.1.txt; present file
-  on disk is /job_site/factory-manual-v1.11.txt (v1.11 lean). Treated as
-  the same active manual per PRECEDENCE LAW (section 20) of that manual.
-  Name-version drift flagged only; no content conflict.
-- Build sheet references /job_site/worker-execution-manual-v1.1.txt;
-  present and matches. No drift.
-- /job_site/stage_activity_log.txt does not yet exist; Foreman A owns the
-  required log entry "cloudflare prep complete" at the CF-PREP checkpoint.
-- The five Stage 3 required public test routes are:
-      /  /health  /telegram/webhook  /session/latest  /calendar/status
-  Stage S4 must deliver /worker-wb/src/routes/calendar-status.ts before
-  CF-TEST, or the CF-TEST pass_condition (all five routes respond) will
-  fail at live check.
+- Build sheet references /job_site/factory-manual-v1.1.txt; file on disk is
+  /job_site/factory-manual-v1.11.txt. Treated as the same active manual per
+  PRECEDENCE LAW (section 20). Name-version drift flagged; no content conflict.
+- Stage 3 CF-PREP gap resolved: /calendar/status handler is now present in
+  src/index.ts and /worker-wb/src/routes/calendar-status.ts exists.
 - Access matrix for all five routes is produced by Worker B at
-  /job_site/cloudflare_access_matrix.txt — out of scope here.
-- Branch identity: CF-PREP work is on
-  claude/verify-cloudflare-deploy-config-ZViq8 (matches declared Stage 3
-  CF-PREP branch). No commit or push required by this worker task per
-  build sheet (repo_mirror_required: no, commit_required: no,
-  push_required: no).
+  /job_site/cloudflare_access_matrix.txt — out of scope for this worker task.
+- No commit or push required by this task per build sheet
+  (repo_mirror_required: no, commit_required: no, push_required: no).
