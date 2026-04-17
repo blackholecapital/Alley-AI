@@ -1,0 +1,361 @@
+VOICE FAILURE MODES — BACKEND PIPELINE LAYER
+EXEC-AI-STAGE4-001 | S3 | WORKER B3.3
+======================================================
+Generated: 2026-04-17
+Scope:     Backend pipeline failure modes only.
+           Covers: transcription_failure, processing_error, timeout,
+                   downstream_reply_failure.
+           Excludes: browser capture failures (voice_failure_modes_browser.txt),
+                     input validation failures (voice_failure_modes_input.txt),
+                     Telegram media fetch failures (voice_failure_modes.txt §5
+                     media_fetch_failed / payload_too_large).
+Companion: /worker-wb/src/integrations/telegram/voice.ts
+           /worker-wb/src/routes/telegram-webhook.ts
+           /worker-wb/src/providers/transcription/index.ts
+           /job_site/executive_assistant_runtime/voice/voice_pipeline.py
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/voice_failure_modes.txt              (Stage 3 roundtrip catalogue)
+- /job_site/voice_failure_modes_browser.txt      (Stage 4 browser catalogue)
+- /job_site/voice_failure_modes_input.txt        (Stage 4 input validation catalogue)
+- /job_site/voice_capture_contract.txt
+- /worker-wb/src/integrations/telegram/voice.ts
+- /worker-wb/src/routes/telegram-webhook.ts
+- /worker-wb/src/providers/transcription/index.ts
+- /worker-wb/src/providers/transcription/provider.ts
+- /job_site/executive_assistant_runtime/voice/voice_pipeline.py
+- /job_site/executive_assistant_runtime/tests/test_voice_pipeline.py
+
+----------------------------------------------------------
+1. LAYER DEFINITION
+----------------------------------------------------------
+The backend pipeline layer begins after input validation succeeds (audio
+bytes are in hand, size and MIME checks have passed) and ends when the
+outbound reply is delivered (or delivery is confirmed to have failed).
+
+It spans three processing stages that can fail independently:
+
+  Stage 1  Transcription   — audio bytes → transcript text
+  Stage 2  Processing      — transcript text → assistant reply text
+  Stage 3  Delivery        — reply text → sent Telegram / UI message
+
+Two runtime paths execute the same stages:
+
+  Path A  Telegram voice webhook
+            handleTelegramVoiceNote (voice.ts)
+            → transcription provider (index.ts)
+            → generateAssistantReply (telegram-webhook.ts)
+            → sendTelegramMessage + recordOutbound (voice.ts / outbound.ts)
+
+  Path B  Executive assistant voice pipeline
+            VoicePipeline.process_turn / process_audio (voice_pipeline.py)
+            → STTService.transcribe_*()
+            → AssistantCore.handle_turn()
+            → TTSService.speak()
+
+----------------------------------------------------------
+2. SAFETY INVARIANTS (pipeline layer)
+----------------------------------------------------------
+P-1  The top-level webhook handler (handleTelegramWebhook) MUST NOT
+     throw. processTelegramUpdate is wrapped in try/catch; any uncaught
+     exception is logged as telegram.webhook.unhandled_error and the
+     handler still returns 200 {"ok":true}.
+
+P-2  Every pipeline failure emits a structured log event at the boundary
+     where it is detected. No silent drops.
+
+P-3  Path A: the session store receives exactly one failure record per
+     failed stage (recordFailure) OR one inbound + one outbound record
+     per successful round-trip. No duplicate writes.
+
+P-4  Path A: failure paths MUST NOT fabricate an assistant reply without
+     an operator decision. The voice.ts fallback replies
+     (FETCH_FALLBACK_REPLY, TRANSCRIPTION_FAILED_REPLY) are explicit
+     contract-approved fallbacks, not arbitrary strings.
+
+P-5  Path B: VoicePipeline catches exceptions at each stage boundary
+     (STT, core, TTS) independently. A TTS failure does not prevent the
+     turn record from being written; a core failure does not re-raise.
+
+----------------------------------------------------------
+3. FAILURE MODES
+----------------------------------------------------------
+
+────────────────────────────────────────────────────────
+Mode: transcription_failure
+────────────────────────────────────────────────────────
+  Stage:    Stage 1 — transcription
+  Definition:
+    The transcription provider returns a non-success result. Covers:
+      a) Provider HTTP non-2xx (Deepgram 4xx / 5xx)
+      b) Provider response body unparseable as JSON
+      c) Provider returns 200 but transcript is absent or whitespace-only
+      d) No provider configured (NoopTranscriptionProvider)
+      e) Provider network error (fetch() throws)
+
+  Sub-cases and their TranscribeResult shapes:
+
+    a) HTTP non-2xx:
+         { ok: false, provider: "deepgram",
+           reason: "deepgram <status>[: <body preview>]",
+           retryable: status >= 500 || status === 429 }
+
+    b) Non-JSON body:
+         { ok: false, provider: "deepgram",
+           reason: "non-json response from deepgram",
+           retryable: true }
+
+    c) Empty transcript (200 OK, no speech detected):
+         { ok: false, provider: "deepgram",
+           reason: "empty transcript",
+           retryable: false }
+         Operator-facing failure_reason: transcription_empty
+
+    d) No provider configured:
+         { ok: false, provider: "noop",
+           reason: "no transcription provider configured",
+           retryable: false }
+
+    e) Network throw:
+         { ok: false, provider: "deepgram",
+           reason: "<err.message>",
+           retryable: true }
+
+  Path A gate (voice.ts handleTelegramVoiceNote):
+    transcript.ok === false branch:
+      logger.error('transcription.failed', { reason, retryable })
+      deliverReply(event, env, logger, TRANSCRIPTION_FAILED_REPLY)
+        → "I heard the voice note but couldn't transcribe it cleanly.
+           Want to try again or send it as text?"
+      return { status: 'transcription_failed', reply_text: TRANSCRIPTION_FAILED_REPLY,
+               transcript: null, provider }
+
+    POST /voice/capture path (handleVoiceCapture):
+      result.ok === false branch:
+        logger.warn('voice.capture.transcription_failed', { reason })
+        recordUiInbound({ text: "[voice: <mime>, <size> bytes]" })
+        HTTP 200 returned; transcript absent from session entry.
+
+  Path B gate (voice_pipeline.py process_turn):
+    STT exception (step 1):
+      logger.error("VoicePipeline: STT error on turn %d")
+      stt_result falls back to STTResult(transcript=text)  — raw input used
+    Empty transcript after strip():
+      VoiceTurn(error="empty transcript", reply_text="", tts_spoken=False)
+      turn appended to history; pipeline continues.
+
+  Session store (Path A, Telegram):
+    Operator-facing failure_reason: transcription_failed or transcription_empty
+    per voice_failure_modes.txt §2 enum.
+    reply_text is the approved fallback string (not null); this is the
+    Stage 3 text_fallback reply mode.
+
+────────────────────────────────────────────────────────
+Mode: processing_error
+────────────────────────────────────────────────────────
+  Stage:    Stage 2 — assistant processing
+  Definition:
+    The assistant pipeline throws or returns an error while converting
+    the transcript into a reply.
+
+  Path A gate (telegram-webhook.ts processTelegramUpdate, text branch):
+    generateAssistantReply throws (deterministic function; unlikely in
+    production but guarded):
+      logger.error('assistant.reply.error', { error: msg })
+      recordFailure({ failure_code: 'reply_generation_error',
+                      failure_message: msg })
+      return  (no reply sent; processing exits cleanly)
+
+  Path A gate (voice.ts handleTelegramVoiceNote, voice branch):
+    generateAssistantReply is injected as deps.assistantPipeline; the
+    voice path does not independently guard it. An exception would
+    propagate to processTelegramUpdate's try/catch wrapper, logged as
+    telegram.webhook.unhandled_error; webhook still returns 200.
+
+  Path B gate (voice_pipeline.py process_turn, step 2):
+    AssistantCore.handle_turn throws:
+      logger.error("VoicePipeline: core error on turn %d")
+      reply_text falls back to:
+        "I encountered an error processing your request. Please try again."
+      session_id = ""
+      Pipeline continues to TTS step with the fallback reply.
+
+  Path B gate (voice_pipeline.py run_text_loop):
+    Unhandled exception from the loop itself:
+      logger.error("VoicePipeline: text loop error")
+      self.state → PipelineState.ERROR
+      Loop exits; history returned as-is.
+
+  What does NOT happen:
+    - The webhook does not return non-2xx (P-1).
+    - Path B does not re-raise from AssistantCore; TTS still runs.
+
+────────────────────────────────────────────────────────
+Mode: timeout
+────────────────────────────────────────────────────────
+  Stage:    Stage 1 — transcription (primary); Stage 2 — processing (secondary)
+  Definition:
+    A pipeline stage exceeds its allotted time budget, aborting the
+    operation before a result is obtained.
+
+  Transcription timeout (Path A — Telegram webhook):
+    Deadline:  TRANSCRIPTION_TIMEOUT_MS = 15 000 ms
+               (inside Telegram's 30 s webhook ack window)
+    Mechanism: voice.ts wraps the transcription provider call in an
+               AbortController with a 15 s deadline.
+               If the deadline fires before provider.transcribe() resolves,
+               the fetch is aborted.
+    Outcome:   TranscribeResult { ok: false, reason: "<abort message>",
+                                  retryable: true }
+               → treated as transcription_failure (same branch)
+    Operator-facing failure_reason: transcription_timeout
+    Log event: transcription.failed with reason referencing abort
+
+    Constraint: the 15 s deadline must remain inside Telegram's 30 s
+    webhook ack window. TRANSCRIPTION_TIMEOUT_MS must never exceed
+    ~25 000 ms (leaving margin for fetch overhead and session-store
+    write). The companion test pins this constant:
+      "transcription timeout constant stays inside the Telegram webhook
+       ack window"
+
+  Transcription timeout (Path A — POST /voice/capture):
+    The capture handler does not impose an explicit deadline on the
+    transcription call beyond the Worker runtime's own request timeout.
+    A hung provider call will be interrupted by the Cloudflare Worker
+    CPU-time limit; the caller receives a 5xx from the platform rather
+    than a structured error body.
+
+  Turn timeout (Path B — VoicePipeline):
+    Config field: VoicePipelineConfig.turn_timeout_secs = 30.0
+    The current implementation records this value in config but does
+    not yet wrap process_turn in an asyncio.wait_for() deadline.
+    A hung AssistantCore or STT call blocks the loop until the
+    provider responds or raises. Enforcement of this deadline is a
+    future hardening task.
+
+  What does NOT happen:
+    - The webhook does not return non-2xx on timeout (P-1).
+    - The session store does not receive a partial or duplicate event.
+
+────────────────────────────────────────────────────────
+Mode: downstream_reply_failure
+────────────────────────────────────────────────────────
+  Stage:    Stage 3 — delivery
+  Definition:
+    The assistant reply text was generated successfully but could not
+    be delivered to the downstream channel (Telegram Bot API or TTS
+    speaker).
+
+  Path A — sendTelegramMessage returns non-2xx (handleTextEvent):
+    Condition:   send.ok === false
+    Log event:   telegram.send.failed { status, reason }
+    Session:     recordFailure({ failure_code: 'send_failed',
+                                 failure_message: send.description })
+    Outbound row: NOT written (recordOutbound skipped)
+    Webhook:     still returns 200 {"ok":true} (P-1)
+    UI effect:   session history shows the inbound event but no outbound
+                 reply; failure badge may appear depending on UI
+                 failure_code rendering.
+
+  Path A — sendTelegramMessage in deliverReply (voice fallback replies):
+    Condition:   send.ok === false
+    Log event:   telegram.voice.send.failed { status, reason }
+    No recordFailure call in this path (voice.ts deliverReply does not
+    call recordFailure; it logs the error and returns without writing
+    an outbound row).
+    Webhook:     still returns 200 {"ok":true}.
+
+  Path B — TTS failure (voice_pipeline.py process_turn, step 3):
+    Condition:   tts.speak() throws
+    Logger:      logger.error("VoicePipeline: TTS error on turn %d")
+    Fallback:    print(f"[TTS FALLBACK] {reply_text}") to stdout
+    spoken:      False
+    VoiceTurn:   tts_spoken=False, reply_text=<reply> (non-empty),
+                 no error field set (error remains None)
+    Pipeline:    continues normally; turn is appended to history.
+
+  Edge case — Telegram network failure during delivery:
+    sendTelegramMessage wraps fetch() in try/catch. A network throw
+    results in send.ok === false with an error code, handled identically
+    to HTTP non-2xx above.
+
+  What does NOT happen:
+    - The webhook does not retry delivery (no built-in retry; Telegram
+      will not retry since we returned 200).
+    - Path B does not re-raise from TTS; the pipeline loop continues.
+    - A TTS failure does not produce an error VoiceTurn (distinguishable
+      from a processing_error by tts_spoken=False with non-empty reply_text).
+
+----------------------------------------------------------
+4. FAILURE DECISION FLOW (backend pipeline, Path A voice)
+----------------------------------------------------------
+
+  Audio bytes received (input validation passed)
+    │
+    ├─ provider.transcribe() called
+    │    ├─ timeout (>15 s) ───────────────────► transcription_timeout
+    │    │                                        (→ transcription_failure branch)
+    │    ├─ network throw ────────────────────►  transcription_failure (retryable)
+    │    ├─ HTTP non-2xx ─────────────────────►  transcription_failure
+    │    ├─ JSON parse error ─────────────────►  transcription_failure (retryable)
+    │    ├─ empty/missing transcript ─────────►  transcription_empty
+    │    └─ ok + non-empty text ─────────────►  transcript ready
+    │
+    ├─ generateAssistantReply(transcript)
+    │    ├─ throws ──────────────────────────►   processing_error
+    │    │                                        (recordFailure, no reply sent)
+    │    └─ returns reply text ───────────────►  reply ready
+    │
+    └─ sendTelegramMessage(reply)
+         ├─ network throw / non-2xx ──────────►  downstream_reply_failure
+         │                                        (recordFailure, no outbound row)
+         └─ ok ───────────────────────────────►  recordOutbound → SUCCESS
+
+----------------------------------------------------------
+5. PIPELINE STATE TRANSITIONS (Path B — VoicePipeline)
+----------------------------------------------------------
+  IDLE    → RUNNING      run_text_loop() / run_audio_loop() started
+  RUNNING → STOPPED      generator exhausted, exit phrase, max_turns reached,
+                         or explicit stop() / close()
+  RUNNING → ERROR        unhandled exception escapes the loop body
+  RUNNING → PAUSED       pause() called
+  PAUSED  → RUNNING      resume() called
+  Any     → STOPPED      close() called
+
+  A pipeline in ERROR state stops processing but does not close STT/TTS
+  services. close() should be called by the supervisor to release resources.
+
+----------------------------------------------------------
+6. LOG EVENT CATALOGUE (pipeline layer)
+----------------------------------------------------------
+  transcription.start              info   bytes, provider, ready flag
+  transcription.ok                 info   provider, text_length, duration_ms
+  transcription.failed             error  provider, reason, retryable
+  voice.capture.transcription_failed warn source_id, provider, reason
+  assistant.reply.generated        info   event_id, kind, reply_length
+  assistant.reply.error            error  event_id, error message
+  telegram.send.ok                 info   event_id, reply_message_id
+  telegram.send.failed             error  event_id, status, reason
+  telegram.voice.send.failed       error  event_id, chat_id, status, reason
+  telegram.voice.flow.outcome      info   event_id, status, has_transcript
+  telegram.webhook.unhandled_error error  error message (catch-all)
+
+  Path B logs (Python logging, prefix VoicePipeline:):
+    VoicePipeline ready             INFO   user, stt, tts, demo
+    VoicePipeline: STT error        ERROR  turn number, exception repr
+    VoicePipeline: core error       ERROR  turn number, exception repr
+    VoicePipeline: TTS error        ERROR  turn number, exception repr
+    VoicePipeline: text loop error  ERROR  exception repr
+
+----------------------------------------------------------
+7. OUT OF SCOPE FOR THIS DOCUMENT
+----------------------------------------------------------
+- Browser state-machine failures → /job_site/voice_failure_modes_browser.txt
+- Input validation failures (empty blob, oversized, corrupted)
+    → /job_site/voice_failure_modes_input.txt
+- Telegram media fetch failures (media_fetch_failed, payload_too_large,
+  duration_too_long) → /job_site/voice_failure_modes.txt §5
+- Session-store schema or persistence errors
+- Cloudflare Worker platform limits (CPU time, memory, subrequest caps)

@@ -1,0 +1,254 @@
+VOICE FAILURE MODES — INPUT VALIDATION LAYER
+EXEC-AI-STAGE4-001 | S3 | WORKER B3.2
+======================================================
+Generated: 2026-04-17
+Scope:     Input validation failure modes only.
+           Covers: empty_audio_blob, corrupted_audio, oversized_payload.
+           Excludes: browser capture failures (see voice_failure_modes_browser.txt),
+                     pipeline/transcription/roundtrip failures (see voice_failure_modes.txt).
+Companion: /worker-wb/src/integrations/telegram/voice.ts (handleVoiceCapture,
+                                                           fetchTelegramVoiceAudio)
+           /worker-wb/src/providers/transcription/index.ts
+           /worker-wb/src/providers/transcription/provider.ts
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/voice_capture_contract.txt
+- /job_site/voice_failure_modes.txt              (Stage 3 roundtrip catalogue)
+- /job_site/voice_failure_modes_browser.txt      (Stage 4 browser catalogue)
+- /worker-wb/src/integrations/telegram/voice.ts
+- /worker-wb/src/providers/transcription/provider.ts
+- /worker-wb/src/providers/transcription/index.ts
+
+----------------------------------------------------------
+1. LAYER DEFINITION
+----------------------------------------------------------
+The input validation layer sits between the transport boundary and the
+transcription provider. It runs synchronously before any STT network
+call is made. Its sole responsibility is to reject payloads that are
+structurally or size-invalid so that the transcription provider and
+pipeline never receive garbage input.
+
+Two entry points gate the same invariants:
+
+  A. POST /voice/capture   (handleVoiceCapture in voice.ts)
+       Called by the browser operator-shell UI.
+       Validates the multipart/form-data audio field.
+
+  B. fetchTelegramVoiceAudio  (voice.ts)
+       Called by the Telegram webhook path.
+       Validates declared file_size and downloaded byte count from the
+       Telegram Bot API.
+
+Both entry points enforce the same three failure modes below.
+
+----------------------------------------------------------
+2. CONSTANTS
+----------------------------------------------------------
+  DEFAULT_MAX_VOICE_BYTES         = 20 * 1024 * 1024  (20 971 520 bytes)
+  DEFAULT_MAX_VOICE_DURATION_SECONDS = 120 s
+  ACCEPTED_AUDIO_MIME_BASES       = ['audio/webm', 'audio/ogg', 'audio/mp4']
+
+Source: voice.ts lines 35–36, 387.
+
+----------------------------------------------------------
+3. FAILURE MODES
+----------------------------------------------------------
+
+────────────────────────────────────────────────────────
+Mode: empty_audio_blob
+────────────────────────────────────────────────────────
+  Definition:
+    The audio field is present and is a File/Blob type but contains
+    zero bytes (audioFile.size === 0).
+
+  Entry point A — POST /voice/capture:
+    Gate location: handleVoiceCapture, voice.ts
+      if (audioFile.size === 0)
+    Evaluated AFTER: content-type parse, multipart field presence check,
+                     MIME type check.
+    Evaluated BEFORE: arrayBuffer() read, transcription provider call.
+
+    HTTP response: 400 Bad Request
+    Body: { "ok": false, "error": { "code": "bad_request",
+            "message": "audio file must not be empty" } }
+    Log event: voice.capture.empty_audio (warn)
+    Session store: no entry written; request exits before recordUiInbound.
+
+  Entry point B — fetchTelegramVoiceAudio:
+    Telegram voice messages with zero bytes do not pass the Bot API's
+    own validation and will not produce a valid file_path from getFile.
+    The empty-bytes scenario manifests here as a download that returns
+    an ArrayBuffer of byteLength 0. This is not an explicit gate in the
+    current implementation; a zero-byte buffer passed to the transcription
+    provider will be caught at the provider boundary as an empty transcript
+    (reason: 'empty transcript', retryable: false).
+    Operator-facing failure_reason: transcription_empty (§2 of
+    voice_failure_modes.txt).
+
+  Invariants:
+    - No transcription network call is made (entry point A).
+    - The mic stream is never involved (this is a server-side gate).
+    - No partial session event is written.
+
+────────────────────────────────────────────────────────
+Mode: corrupted_audio
+────────────────────────────────────────────────────────
+  Definition:
+    The audio blob is non-empty and passes size/MIME checks but its
+    binary content cannot be decoded as valid audio by the transcription
+    provider. This includes: truncated containers, mismatched codec
+    headers, bit-flipped frames, and recordings that were interrupted
+    mid-write.
+
+  Entry point A — POST /voice/capture:
+    Gate location: no structural parse at the HTTP handler level.
+    The handler reads the blob into an ArrayBuffer (arrayBuffer()) and
+    forwards it to the provider. Corruption is therefore detected at
+    the provider boundary, not the validation layer.
+
+    Deepgram responses for a corrupted payload:
+      a) HTTP 400 — Deepgram rejects the container:
+           TranscribeResult { ok: false, reason: "deepgram 400: <body>",
+                              retryable: false }
+      b) HTTP 200 with empty/missing transcript — Deepgram decodes
+         partial frames but finds no speech:
+           TranscribeResult { ok: false, reason: "empty transcript",
+                              retryable: false }
+
+    The capture handler catches both via the result.ok === false branch:
+      logger.warn('voice.capture.transcription_failed', { reason })
+    recordUiInbound is still called with a stub text:
+      "[voice: <mime>, <size> bytes]"
+    HTTP response to caller: 200 { ok: true, session_id: ... }
+      (the handler treats transcription failure as a soft outcome; the
+      session entry carries no transcript text but the upload is ack'd.)
+
+  Entry point B — fetchTelegramVoiceAudio:
+    The fetch layer returns the raw bytes to the webhook handler without
+    parsing them. Corruption is detected at the Deepgram adapter with
+    the same outcomes as entry point A. Operator-facing failure_reason:
+    transcription_failed or transcription_empty (voice_failure_modes.txt §2).
+
+  Practical note:
+    The browser MediaRecorder produces structurally valid containers
+    for any non-zero recording. Corruption in practice arises from:
+      - Interrupted uploads (partial multipart body) — caught by the
+        formData() parse step, which throws and returns 400 before the
+        audio field is read.
+      - Disk or network bit-flip during transfer — extremely rare;
+        indistinguishable from a valid file at the HTTP layer.
+    True structural validation (container header parse) is out of scope
+    for this layer; it belongs to the transcription provider.
+
+────────────────────────────────────────────────────────
+Mode: oversized_payload
+────────────────────────────────────────────────────────
+  Definition:
+    The audio blob's byte count exceeds DEFAULT_MAX_VOICE_BYTES (20 MiB).
+
+  Entry point A — POST /voice/capture:
+    Gate location: handleVoiceCapture, voice.ts
+      if (audioFile.size > DEFAULT_MAX_VOICE_BYTES)
+    Evaluated AFTER: MIME type check, empty-blob check.
+    Evaluated BEFORE: arrayBuffer() read, transcription provider call.
+
+    HTTP response: 413 Request Entity Too Large
+    Body: { "ok": false, "error": { "code": "bad_request",
+            "message": "audio exceeds 20971520 byte limit" } }
+    Log event: voice.capture.size_exceeded (warn) with { size, max }
+    Session store: no entry written.
+
+  Entry point B — fetchTelegramVoiceAudio (three sub-gates):
+
+    Sub-gate 1 — declared file_size before getFile:
+      if (typeof voice.file_size === 'number' && voice.file_size > maxBytes)
+      VoiceFetchResult { ok: false, reason: 'size_too_large',
+        detail: "declared size <N> exceeds max <LIMIT>" }
+      No network call made.
+
+    Sub-gate 2 — remote file_size from getFile response:
+      if (typeof meta.result.file_size === 'number' &&
+          meta.result.file_size > maxBytes)
+      VoiceFetchResult { ok: false, reason: 'size_too_large',
+        detail: "remote size <N> exceeds max <LIMIT>" }
+      getFile has been called; download has NOT been started.
+
+    Sub-gate 3 — actual downloaded bytes:
+      if (audio.byteLength > maxBytes)
+      VoiceFetchResult { ok: false, reason: 'download_size_exceeded',
+        detail: "downloaded <N> exceeds max <LIMIT>" }
+      Both getFile and the download fetch have completed; the buffer is
+      discarded without forwarding to the transcription provider.
+
+    All three sub-gates collapse to operator-facing failure_reason:
+    payload_too_large at the session-store boundary per voice_failure_modes.txt §2.
+
+    Ordering invariant (voice_failure_modes.txt §6, gate 2):
+      The payload-size check MUST fire before any getFile / download
+      attempt. Sub-gate 1 satisfies this; sub-gates 2 and 3 are defence-
+      in-depth for cases where the declared size was absent or wrong.
+
+  Duration limit (related gate, not a size gate):
+    fetchTelegramVoiceAudio also checks:
+      if (voice.duration > maxDuration)  →  reason: 'duration_too_long'
+    This fires before any size check. It is a separate validation axis
+    (time, not bytes) and is documented here for completeness, but is
+    not one of the three primary failure modes of this catalogue.
+
+----------------------------------------------------------
+4. GATE ORDER (input validation layer only)
+----------------------------------------------------------
+Within handleVoiceCapture (entry point A):
+
+  1. HTTP method check       → 405 if not POST
+  2. formData() parse        → 400 if multipart malformed / wrong content-type
+  3. audio field presence    → 400 if field absent or is a string
+  4. MIME type check         → 415 if not in ACCEPTED_AUDIO_MIME_BASES
+  5. empty_audio_blob        → 400 if audioFile.size === 0
+  6. oversized_payload       → 413 if audioFile.size > 20 MiB
+  7. arrayBuffer() + transcribe → corrupted_audio detected here if applicable
+
+Within fetchTelegramVoiceAudio (entry point B):
+
+  1. duration_too_long       → before any fetch
+  2. size_too_large (declared) → before getFile fetch
+  3. getFile fetch + errors
+  4. size_too_large (remote)  → after getFile, before download fetch
+  5. download fetch + errors
+  6. download_size_exceeded   → after download, before forwarding bytes
+  7. transcribe              → corrupted_audio detected here if applicable
+
+----------------------------------------------------------
+5. INVARIANTS (input validation layer)
+----------------------------------------------------------
+V-1  All three failure modes in this catalogue are detected and
+     rejected BEFORE the audio bytes are forwarded to the transcription
+     provider (with the exception of corrupted_audio, which cannot be
+     structurally validated at the HTTP layer — see §3).
+
+V-2  No session-store entry is written for empty_audio_blob or
+     oversized_payload at entry point A. The upload is rejected cleanly.
+
+V-3  The oversized_payload gate runs after the empty-blob gate so that
+     a zero-byte payload gets the more specific error code.
+
+V-4  Sub-gates for oversized_payload fire at the earliest possible
+     point; later sub-gates are defence-in-depth only.
+
+V-5  All rejection responses from entry point A follow the documented
+     endpoint contract:
+       { "ok": false, "error": { "code": "<string>", "message": "<string>" } }
+     with appropriate HTTP status codes (400, 413, 415).
+
+----------------------------------------------------------
+6. OUT OF SCOPE FOR THIS DOCUMENT
+----------------------------------------------------------
+- Browser state-machine failures (permission_denied, unsupported_browser,
+  recording_cancelled) → /job_site/voice_failure_modes_browser.txt
+- Transcription provider failures (transcription_failed, transcription_timeout,
+  transcription_empty) → /job_site/voice_failure_modes.txt §5
+- Telegram media fetch failures (media_fetch_failed) → voice_failure_modes.txt §5
+- Pipeline orchestration errors (STT/core/TTS exceptions in voice_pipeline.py)
+- Reply delivery failures (sendTelegramMessage non-2xx)
