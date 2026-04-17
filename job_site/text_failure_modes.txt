@@ -1,0 +1,375 @@
+TEXT REPLY FAILURE MODES — EXEC-AI-STAGE4-001 | S2 | WORKER B
+==============================================================
+Generated: 2026-04-17
+Branch:    claude/verify-public-routes-SknvY
+Scope:     Every failure path in the Telegram text reply pipeline.
+           For each mode: what triggers it, what the session store
+           contains, what the HTTP response is, and how an operator
+           can identify it via /session/latest or Telegram itself.
+
+Sources:
+  /worker-wb/src/routes/telegram-webhook.ts   (processTelegramUpdate,
+                                               handleTextEvent, response contract)
+  /worker-wb/src/lib/session-store.ts         (session state contract)
+  /worker-wb/src/lib/env.ts                   (validateTelegramEnv)
+  /worker-wb/test/telegram-text-reply-completion.test.ts  (C5 failure tests)
+
+----------------------------------------------------------------------
+0. SHARED INVARIANT
+----------------------------------------------------------------------
+The webhook route ALWAYS returns HTTP 200 with body {"ok": true} and
+Content-Type: application/json regardless of the failure mode. This is
+a deliberate contract so Telegram never marks updates as failed and
+never retries. All failure modes are therefore silent at the HTTP level
+and visible only through:
+  a) Structured worker logs (wrangler tail / Cloudflare observability)
+  b) /session/latest — inbound-without-outbound signals an open loop
+  c) Telegram client — no bot reply appears
+
+----------------------------------------------------------------------
+1. FAILURE MODE: WRONG OR MISSING WEBHOOK SECRET
+----------------------------------------------------------------------
+Trigger:
+  The X-Telegram-Bot-Api-Secret-Token header on the inbound POST either
+  does not match env.TELEGRAM_WEBHOOK_SECRET or is absent entirely.
+  Source: processTelegramUpdate, lines 129-134 (telegram-webhook.ts).
+
+Pipeline effect:
+  processTelegramUpdate returns early after the secret check.
+  recordInbound is NEVER called.
+  generateAssistantReply is NEVER called.
+  sendTelegramMessage is NEVER called.
+  recordOutbound is NEVER called.
+
+Session store state:
+  No items added. Counts unchanged.
+  /session/latest: no new rows, counts stable.
+
+HTTP response:
+  200 {"ok": true}   (always — see shared invariant)
+
+Log event:
+  level=warn, event=telegram.webhook.secret_mismatch
+
+Operator identification:
+  1. No new row in /session/latest after the expected message.
+  2. Telegram thread shows no bot reply.
+  3. wrangler tail shows telegram.webhook.secret_mismatch at WARN.
+
+Recovery:
+  Verify TELEGRAM_WEBHOOK_SECRET matches the value used in setWebhook.
+  Re-register the webhook with the correct secret_token.
+  Use:  wrangler secret put TELEGRAM_WEBHOOK_SECRET
+  Then: curl .../setWebhook -d "secret_token=<new_value>"
+
+----------------------------------------------------------------------
+2. FAILURE MODE: MISSING ENV (TELEGRAM_BOT_TOKEN OR WEBHOOK_SECRET)
+----------------------------------------------------------------------
+Trigger:
+  TELEGRAM_BOT_TOKEN or TELEGRAM_WEBHOOK_SECRET is not set in the
+  Worker secrets. validateTelegramEnv returns ok: false.
+  Source: processTelegramUpdate, lines 123-127.
+
+Pipeline effect:
+  processTelegramUpdate returns early before the secret check.
+  No processing occurs.
+
+Session store state:
+  No items added. Counts unchanged.
+
+HTTP response:
+  200 {"ok": true}
+
+Log event:
+  level=error, event=env.telegram.invalid, errors=[{key:...,message:...}]
+
+Operator identification:
+  1. No rows in /session/latest despite received Telegram messages.
+  2. wrangler tail shows env.telegram.invalid at ERROR level.
+
+Recovery:
+  Set missing secrets from within /worker-wb:
+    wrangler secret put TELEGRAM_BOT_TOKEN
+    wrangler secret put TELEGRAM_WEBHOOK_SECRET
+  Re-deploy if environment changes require it.
+  Confirm with: wrangler secret list
+
+----------------------------------------------------------------------
+3. FAILURE MODE: MALFORMED JSON BODY
+----------------------------------------------------------------------
+Trigger:
+  The inbound POST body is not valid JSON. This should not occur with
+  a correctly registered Telegram webhook but can happen in manual
+  testing or with a proxied/malformed request.
+  Source: processTelegramUpdate, lines 136-142.
+
+Pipeline effect:
+  request.json() throws. Caught; processTelegramUpdate returns early.
+  recordInbound is NEVER called.
+
+Session store state:
+  No items added.
+
+HTTP response:
+  200 {"ok": true}
+
+Log event:
+  level=warn, event=telegram.webhook.bad_json
+
+Operator identification:
+  wrangler tail shows telegram.webhook.bad_json at WARN.
+  No row in /session/latest.
+
+Recovery:
+  Ensure the POST body is valid JSON when testing manually.
+  Telegram itself never sends malformed JSON; this mode is test-only.
+
+----------------------------------------------------------------------
+4. FAILURE MODE: BAD UPDATE SHAPE (MISSING update_id)
+----------------------------------------------------------------------
+Trigger:
+  The JSON body parses successfully but update.update_id is absent or
+  not a number. Can occur with manually crafted test requests.
+  Source: processTelegramUpdate, lines 144-147.
+
+Pipeline effect:
+  Returns early before parseTelegramUpdate is called.
+  No session store writes.
+
+HTTP response:
+  200 {"ok": true}
+
+Log event:
+  level=warn, event=telegram.webhook.bad_update_shape
+
+Recovery:
+  Ensure manually crafted test payloads include "update_id": <number>.
+
+----------------------------------------------------------------------
+5. FAILURE MODE: UPDATE WITH NO MESSAGE (EDITED MESSAGE / CHANNEL POST)
+----------------------------------------------------------------------
+Trigger:
+  The Update object has no "message" and no "edited_message" field.
+  Telegram sends non-message updates (e.g., channel_post, callback_query,
+  my_chat_member) for events the Worker does not handle.
+  parseTelegramUpdate returns null.
+  Source: inbound.ts line 23; processTelegramUpdate lines 149-153.
+
+Pipeline effect:
+  parseTelegramUpdate returns null.
+  Returns early; no session store writes.
+
+HTTP response:
+  200 {"ok": true}
+
+Log event:
+  level=info, event=telegram.webhook.no_message, update_id=N
+
+Operator identification:
+  Expected and normal for non-message updates. No operator action needed.
+  If this occurs for an expected text message, verify the setWebhook
+  allowed_updates includes "message".
+
+Recovery:
+  Re-register webhook with:
+    allowed_updates=["message"]
+  to filter out non-message update types and reduce noise.
+
+----------------------------------------------------------------------
+6. FAILURE MODE: NON-TEXT MESSAGE (VOICE, STICKER, PHOTO, ETC.)
+----------------------------------------------------------------------
+Trigger:
+  The inbound message is a voice note, sticker, photo, document, or
+  other non-text media. parseTelegramUpdate classifies the event as
+  kind='voice' or kind='other'.
+  Source: inbound.ts classify(); telegram-webhook.ts processTelegramUpdate
+  lines 163, 174, 187.
+
+Pipeline effect:
+  recordInbound IS called (event is recorded in session store with
+  kind='voice' or kind='other').
+  For voice:  handleTelegramVoiceNote is dispatched (voice golden path).
+  For other:  no reply path exists; unhandled_kind is logged.
+  generateAssistantReply is NOT called for non-text events.
+
+Session store state (for kind='other'):
+  One inbound item recorded, direction=inbound, kind=other.
+  No outbound item.
+  /session/latest: counts.inbound + 1, counts.outbound unchanged.
+
+HTTP response:
+  200 {"ok": true}
+
+Log event:
+  level=info, event=telegram.webhook.unhandled_kind, kind=other
+
+Operator identification:
+  /session/latest shows an inbound item with kind='other' and no
+  corresponding outbound.
+
+Recovery:
+  Expected behavior for non-handled media types. If an assistant reply
+  is required for all media, a catch-all fallback branch can be added
+  to processTelegramUpdate after the kind='voice' check. Out of Stage 4
+  scope.
+
+----------------------------------------------------------------------
+7. FAILURE MODE: OUTBOUND SEND FAILS (TRANSPORT FAILURE)
+----------------------------------------------------------------------
+Trigger:
+  sendTelegramMessage returns {ok: false, status: N, description: "..."}.
+  In the current stub, this does NOT occur in production (the stub always
+  returns {ok: true}). It would occur if the stub is replaced with a real
+  Telegram API call and the API is unreachable or returns a non-OK result.
+  Source: telegram-webhook.ts handleTextEvent lines 84-96.
+  Pinned by: /worker-wb/test/telegram-text-reply-completion.test.ts C5 tests.
+
+Pipeline effect:
+  recordInbound IS called (inbound recorded).
+  generateAssistantReply IS called (reply text is generated).
+  sendTelegramMessage returns ok: false.
+  handleTextEvent logs telegram.send.failed at ERROR level.
+  handleTextEvent returns early — recordOutbound is NEVER called.
+
+Session store state:
+  One inbound item recorded (kind=text), no outbound item.
+  counts.inbound + 1, counts.outbound unchanged.
+  /session/latest: operator sees the received message but no reply.
+  The partial turn is readable: inbound exists, outbound does not.
+
+HTTP response:
+  200 {"ok": true}   (telegram-webhook.ts always returns 200)
+
+Log event:
+  level=error, event=telegram.send.failed, event_id=N, chat_id=N,
+  status=N, reason="..."
+
+Operator identification:
+  1. /session/latest: counts.outbound does NOT increase after a message
+     that should have produced a reply.
+  2. Telegram thread: no bot reply appears.
+  3. wrangler tail: telegram.send.failed at ERROR level.
+  4. Pattern: counts.inbound > counts.outbound (open loop).
+
+Recovery:
+  This failure mode is transport-level. Corrective actions:
+  a) Verify TELEGRAM_BOT_TOKEN is correct and not revoked.
+  b) Check Telegram API status.
+  c) Retry the message from the Telegram client — the next inbound
+     will start a new pipeline run. No state repair is needed in the
+     session store.
+  d) The partially recorded inbound item is retained in the ring buffer
+     and visible in /session/latest; it does not need to be cleaned up.
+
+----------------------------------------------------------------------
+8. FAILURE MODE: EMPTY TEXT IN MESSAGE
+----------------------------------------------------------------------
+Trigger:
+  The inbound message has a text field that is an empty string or
+  contains only whitespace. parseTelegramUpdate classifies it as
+  kind='text' but event.text.trim() is empty.
+  Source: telegram-webhook.ts generateAssistantReply lines 51-53.
+
+Pipeline effect:
+  recordInbound IS called.
+  generateAssistantReply IS called. The empty-text branch returns:
+    "I didn't catch any text in that message. Send it again and I'll
+     take a look."
+  This is a valid, completed assistant reply. The pipeline DOES complete.
+  sendTelegramMessage IS called with the fallback reply text.
+  recordOutbound IS called (if send succeeds).
+
+Session store state:
+  NORMAL completion — both inbound and outbound recorded.
+  This is NOT a failure mode at the session-store level.
+
+Note:
+  This mode is a graceful fallback, not an error. Both items appear in
+  /session/latest. The operator UI reflects a complete exchange. The
+  only difference from a normal turn is the reply text is the empty-input
+  fallback string.
+
+----------------------------------------------------------------------
+9. FAILURE MODE: UNHANDLED EXCEPTION IN PIPELINE
+----------------------------------------------------------------------
+Trigger:
+  An unexpected exception is thrown anywhere inside processTelegramUpdate
+  (e.g., JSON parse succeeds but an imported module throws during
+  execution). This is the catch-all path.
+  Source: telegram-webhook.ts handleTelegramWebhook lines 197-203.
+
+Pipeline effect:
+  The outer try/catch in handleTelegramWebhook catches the error.
+  State of the session store is indeterminate (depends on where the
+  exception occurred — possibly partial state).
+  The error is logged at ERROR level.
+  The route STILL returns 200 {"ok": true}.
+
+Log event:
+  level=error, event=telegram.webhook.unhandled_error, error="..."
+
+Operator identification:
+  wrangler tail shows telegram.webhook.unhandled_error at ERROR.
+  May or may not have a partial session store entry.
+
+Recovery:
+  Investigate the error message in wrangler tail.
+  This failure mode should not occur in production with the current
+  deterministic pipeline. If it does, it indicates a programming error
+  that requires a code fix.
+
+----------------------------------------------------------------------
+10. FAILURE MODE SUMMARY MATRIX
+----------------------------------------------------------------------
+mode                         HTTP  inbound  outbound  log level / event
+---------------------------  ----  -------  --------  -------------------
+1. Wrong/missing secret       200   no       no        WARN  webhook.secret_mismatch
+2. Missing env                200   no       no        ERROR env.telegram.invalid
+3. Bad JSON body              200   no       no        WARN  webhook.bad_json
+4. Bad update shape           200   no       no        WARN  webhook.bad_update_shape
+5. No message in update       200   no       no        INFO  webhook.no_message
+6. Non-text media (other)     200   yes      no        INFO  webhook.unhandled_kind
+7. Send fails (transport)     200   yes      no        ERROR telegram.send.failed
+8. Empty text                 200   yes      yes(*)    (graceful fallback — not an error)
+9. Unhandled exception        200  maybe    maybe      ERROR webhook.unhandled_error
+
+(*) Mode 8 completes normally with a fallback reply text.
+
+Key invariant: HTTP is always 200. Failure visibility is via logs and
+/session/latest. Mode 7 (inbound without outbound) is the canonical
+"open loop" failure state that CF-TEST probes for.
+
+----------------------------------------------------------------------
+11. OPERATOR QUICK-DIAGNOSIS GUIDE
+----------------------------------------------------------------------
+Symptom: No reply in Telegram, no new rows in /session/latest
+  → Likely modes 1, 2, 3, 4, 5.
+  → Check wrangler tail for the specific log event.
+  → Mode 1 most common after a new deploy or secret rotation.
+
+Symptom: Inbound visible in /session/latest, no outbound
+  → Likely mode 6 (non-text media) or mode 7 (send failure).
+  → If kind=other in the inbound item, it's mode 6 (normal).
+  → If kind=text with no outbound, it's mode 7 (send failure).
+  → Check wrangler tail for telegram.send.failed.
+
+Symptom: Inbound and outbound both present, but reply looks like a
+         fallback ("I didn't catch any text...")
+  → Mode 8 (empty text). Normal behavior; no action needed.
+
+Symptom: /session/latest counts show inbound > outbound across many turns
+  → Persistent open-loop pattern. Likely mode 7 recurring.
+  → Check TELEGRAM_BOT_TOKEN validity.
+  → Check wrangler tail for repeated telegram.send.failed events.
+
+----------------------------------------------------------------------
+12. ARTIFACT SELF-CHECK
+----------------------------------------------------------------------
+expected_artifact: /job_site/text_failure_modes.txt
+written_at:        /home/user/ALI-ai/job_site/text_failure_modes.txt
+covers:            9 failure modes + summary matrix + diagnosis guide
+companion_test:    /worker-wb/test/telegram-text-reply-completion.test.ts
+                   C5 tests pin mode 7 (send failure) behavior
+repo_mirror_required: yes
+commit_required:      yes
+push_required:        yes

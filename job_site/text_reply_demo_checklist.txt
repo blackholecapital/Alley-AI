@@ -1,29 +1,38 @@
-TEXT REPLY-BY-DEFAULT DEMO CHECKLIST — EXEC-AI-STAGE3-004 | S2 | WORKER B
+TEXT REPLY COMPLETION DEMO CHECKLIST — EXEC-AI-STAGE4-001 | S2 | WORKER B
 ==========================================================================
 Generated: 2026-04-17
-Branch:    claude/verify-api-endpoints-dxGjT
-Companion artifact: /worker-wb/test/telegram-text-reply-default.test.ts
-Scope:     Operator-facing demo + verification steps proving two-way
-           Telegram text behavior across two consecutive messages,
-           with each message producing an assistant reply by default
-           (no receipt-only acknowledgements).
+Branch:    claude/verify-public-routes-SknvY
+Companion artifact: /worker-wb/test/telegram-text-reply-completion.test.ts
+Scope:     Operator-facing demo + verification steps proving two consecutive
+           text exchanges COMPLETE end-to-end: inbound received, assistant
+           reply generated, outbound persisted in session store, and one
+           clean failure state rendered readably in /session/latest.
+
+Note: This file supersedes the Stage 3 version
+      (/job_site/text_reply_demo_checklist.txt, EXEC-AI-STAGE3-004).
+      The Stage 3 "reply by default" contract (reply-by-default.test.ts)
+      remains valid; this Stage 4 version adds the COMPLETION contract
+      (text is a completed assistant response, not a bare receipt) and the
+      failure-state proof step.
 
 --------------------------------------------------------------------------
 0. REFERENCES CONSULTED
 --------------------------------------------------------------------------
-- /job_site/factory-manual-v1.1.txt   (present on disk as
-                                       /job_site/factory-manual-v1.11.txt
-                                       — treated as the same active
-                                       manual per its PRECEDENCE LAW)
-- /job_site/worker-execution-manual-v1.1.txt
-- /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+- /job_site/build-sheet-EXEC-AI-STAGE4-001.txt   (active build sheet)
+- /job_site/factory-manual-v1.11.txt              (v1.1 name drift flagged;
+                                                   same active manual per
+                                                   PRECEDENCE LAW)
+- /worker-wb/src/routes/telegram-webhook.ts       (handler + generateAssistantReply)
+- /worker-wb/src/lib/session-store.ts             (session persistence)
+- /worker-wb/src/integrations/telegram/outbound.ts (send stub)
 
 --------------------------------------------------------------------------
-1. STAGE 3 S2 CONTRACT UNDER TEST
+1. STAGE 4 S2 COMPLETION CONTRACT UNDER TEST
 --------------------------------------------------------------------------
 Build sheet S2 goal:
-  "Ensure text messages generate real assistant replies by default and
-   are reflected in the UI."
+  "Fix the live text path so inbound text consistently produces a completed
+   assistant reply, persists the full exchange, and records readable failure
+   states when reply generation cannot complete."
 
 Worker A S2 contract paths:
   /worker-wb/src/integrations/telegram/inbound.ts
@@ -31,54 +40,75 @@ Worker A S2 contract paths:
   /worker-wb/src/routes/telegram-webhook.ts
   /worker-wb/src/lib/session-store.ts
 
-S2 reply-by-default contract pinned by this checklist + companion test:
-  R1. Every text-bearing inbound update produces an outbound reply
-      recorded in the session store. Receipt-only ack = PATCH.
-  R2. Two consecutive inbound messages each produce their own outbound
-      reply, in order. Session store interleaving:
-        in:1  ->  out:1  ->  in:2  ->  out:2
-  R3. Every outbound row:
-        - targets the same chat_id as the inbound it replies to
-        - carries a non-empty `text` string (no silent ack)
-        - varies with the inbound text (reply derives from the message,
-          not a static no-op string)
-  R4. session_id from /session/latest is stable across both turns so
-      the operator UI renders one continuous trail.
+S4 completion contract pinned by this checklist + companion test:
+  C1. Every inbound text turn produces a completed assistant reply:
+      non-empty, non-receipt ("received: ..."), assistant-voice text.
+  C2. Every completed exchange persists BOTH the inbound and outbound
+      item in the session store.
+      Inbound-without-outbound = incomplete loop = PATCH condition.
+  C3. The outbound session item carries the exact reply text from
+      generateAssistantReply and the correct chat_id.
+  C4. Two consecutive exchanges maintain session continuity; all four
+      items appear in order: in:1, out:1, in:2, out:2.
+  C5. When the outbound send fails, no outbound row is recorded.
+      The operator can see the partial turn (inbound only) via
+      /session/latest — failure is not a silent drop.
 
 --------------------------------------------------------------------------
 2. AUTOMATED TEST COVERAGE MATRIX
 --------------------------------------------------------------------------
-File: /worker-wb/test/telegram-text-reply-default.test.ts
+File: /worker-wb/test/telegram-text-reply-completion.test.ts
+Local run result: 19 passed, 0 failed (19 total)
 
-Area A — Fixture coherence
+Area A — Reply quality (C1)
   test ids:
-    "two consecutive update fixtures share chat_id and differ in text"
-    "webhook request shape declares secret-token header and POST method"
-  proves: fixtures honor Telegram Bot API and the build-sheet route.
+    "generateAssistantReply: empty text returns readable fallback, not a crash (C1)"
+    "generateAssistantReply: greeting returns completed assistant-voice reply (C1)"
+    "generateAssistantReply: question returns contextual reply, not bare receipt (C1)"
+    "generateAssistantReply: two distinct inputs produce two distinct replies (C1)"
+    "generateAssistantReply: scheduling request returns substantive reply (C1)"
+  proves: generateAssistantReply produces completed assistant responses,
+          not bare receipts or static strings.
 
-Area B — Reply by default (single message)
+Area B — Send stub (transport contract)
   test id:
-    "first inbound update produces an outbound reply (reply-by-default)"
-  proves R1: every inbound text yields one outbound row.
+    "sendTelegramMessage stub returns {ok: true} with a positive integer message_id"
+  proves: the outbound stub always resolves with a valid send result,
+          enabling recordOutbound to run.
 
-Area C — Two consecutive messages
+Area C — Single exchange completion (C2, C3)
   test ids:
-    "two consecutive updates produce two outbound replies"
-    "session store interleaves in:1, out:1, in:2, out:2 in chronological order"
-    "inbound + outbound ids encode the originating telegram update_id"
-  proves R2: in/out ordering and id stability across two turns.
+    "single exchange: inbound AND outbound both recorded after completion (C2)"
+    "outbound session item carries the exact generateAssistantReply text (C3)"
+    "outbound session item targets the originating chat_id (C3 round-trip closure)"
+    "outbound session item direction is 'outbound' and source is 'telegram' (C3)"
+  proves: each successful exchange persists both sides; the outbound item
+          carries the full reply text and correct routing identity.
 
-Area D — No silent ack, no static reply
+Area D — Two consecutive exchanges (C4)
   test ids:
-    "every outbound reply carries non-empty text — no silent ack"
-    "outbound replies vary with inbound text — reply derives from the message"
-  proves R3: reply content is non-empty and per-message.
+    "two consecutive exchanges: four items in session store (C4)"
+    "two exchanges: chronological order is in:1, out:1, in:2, out:2 (C4)"
+    "two exchanges: each outbound reply differs — no static ack (C4)"
+    "session_id is stable across two consecutive exchanges (C4 UI continuity)"
+    "two exchanges: both outbound items have non-empty reply text (C4)"
+  proves: two-turn completion, correct interleaving, session continuity,
+          and per-message reply variation.
 
-Area E — Round-trip closure
+Area E — Clean failure state (C5)
   test ids:
-    "outbound chat_id equals inbound chat.id for both turns (round-trip closure)"
-    "session_id is stable across two consecutive turns"
-  proves R3 chat-identity invariant and R4 session continuity.
+    "failure state: send failure → inbound recorded, outbound NOT recorded (C5)"
+    "failure state: reply text is still generated even when send fails (C5)"
+    "failure state: subsequent successful turn completes correctly after failed turn (C5)"
+  proves: a failed send leaves a readable partial record (inbound only);
+          the assistant still generates a reply (logic works, transport failed);
+          recovery on the next turn is clean.
+
+Area F — HTTP response contract
+  test id:
+    "webhook HTTP response contract: declared as always 200 {ok: true} regardless of outcome"
+  proves: the declared HTTP contract is consistent with the source code comment
+          and CF-TEST expectations.
 
 --------------------------------------------------------------------------
 3. RUNNING THE TESTS
@@ -86,136 +116,176 @@ Area E — Round-trip closure
 Self-contained assertion harness — no new devDependency added.
 
   Option A — direct (Node 22+ with TS strip types):
-      cd worker-wb && \
-        node --experimental-strip-types \
-          test/telegram-text-reply-default.test.ts
+    cd worker-wb && \
+    node --loader ./test/ts-resolve.mjs \
+         --experimental-strip-types \
+         test/telegram-text-reply-completion.test.ts
 
   Option B — any TS-aware runner (once a framework is added):
-      npx vitest run worker-wb/test/telegram-text-reply-default.test.ts
+    npx vitest run worker-wb/test/telegram-text-reply-completion.test.ts
 
-Last local run on this branch:
-  10 passed, 0 failed (10 total)
+Verified local run on this branch:
+  19 passed, 0 failed (19 total)
 
-The simulator function `simulateRoundTrip` in the test file mirrors
-the reply-by-default contract Worker A's webhook + session-store must
-satisfy. Once a real test runner with bundler-style module resolution
-is wired up, swap `simulateRoundTrip` for live imports of
-  /worker-wb/src/routes/telegram-webhook.ts
-  /worker-wb/src/lib/session-store.ts
-The fixtures and assertions remain canonical.
+The test imports real source modules (generateAssistantReply, parseTelegramUpdate,
+sendTelegramMessage, session store functions) — no simulator. The pipeline
+helper mirrors the actual handleTelegramWebhook text path step by step.
 
 --------------------------------------------------------------------------
-4. LIVE-PATH OPERATOR DEMO STEPS (post-deploy)
+4. LIVE-PATH OPERATOR DEMO STEPS (post-deploy, against workers.dev)
 --------------------------------------------------------------------------
 Prereqs:
-  * Worker deployed from /worker-wb to *.workers.dev (per Stage 3
-    /job_site/cloudflare_access_matrix.txt).
+  * Worker deployed from /worker-wb to *.workers.dev (per
+    /job_site/cloudflare_access_matrix.txt — workers.dev surface).
   * TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET set via
-    `wrangler secret put` in the /worker-wb context.
-  * Webhook registered against the workers.dev URL OR the custom-domain
-    URL with /telegram/webhook in the Access Bypass policy.
-  * Operator UI shell open at the Worker root ("/").
+    `wrangler secret put` from within /worker-wb.
+  * Webhook registered against the workers.dev URL via:
+      curl -s -X POST \
+        "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+        -d "url=https://ali-ai.<account>.workers.dev/telegram/webhook" \
+        -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}" \
+        -d "allowed_updates=[\"message\"]"
+  * Operator UI open at "https://ali-ai.<account>.workers.dev/".
 
-Step 1 — pre-flight: confirm /session/latest is empty or stable
-  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | jq '.counts'
-  Expect: {"inbound":N,"outbound":N,"total":2N} for some N >= 0.
-  Record the starting `session_id` from the response.
+Step 0 — pre-flight: confirm /health responds
+  curl -s "https://ali-ai.<account>.workers.dev/health" | jq '.'
+  Expect: {"ok": true, "status": "ok", "correlation_id": "..."}
+  If this fails, the Worker is not deployed or not reachable.
 
-Step 2 — send the FIRST text message from Telegram
-  Action: in the Telegram client, send "first message: how are you" to
-          the bot.
-  Expect (inside ~2 s):
-    - bot reply visible in Telegram client (NOT just a typing indicator,
-      NOT silent — actual message text from the bot)
-    - operator UI shows one new inbound row AND one new outbound row
-      for this turn within one poll interval
-
-Step 3 — verify session store after first turn
-  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | jq '.counts'
-  Expect: counts.inbound == N+1, counts.outbound == N+1, counts.total == 2N+2
+Step 1 — baseline: record starting session_id and counts
   curl -s "https://ali-ai.<account>.workers.dev/session/latest" | \
-    jq '.items[0:2] | map({direction, chat_id, text})'
-  Expect: items[0] direction=outbound (newest), items[1] direction=inbound,
-          both with chat_id == your private chat id, outbound text non-empty.
+    jq '{session_id: .session.session_id, counts: .counts}'
+  Record the session_id (S0) and counts (N_in, N_out).
 
-Step 4 — send the SECOND text message from Telegram
-  Action: in the Telegram client, send "second message: what is on my
-          calendar" to the bot.
-  Expect (inside ~2 s):
-    - second bot reply visible in Telegram client
-    - the bot reply must be DIFFERENT in content from the first reply
-      (proves reply derives from the message, not a static ack)
-    - operator UI shows another in/out pair appended to the trail
+Step 2 — FIRST text exchange
+  Action: in the Telegram client, send "schedule a meeting tomorrow at 2pm"
+          to the bot.
+  Expect (within ~2 s):
+    - The bot sends a reply in the Telegram chat thread. The reply must:
+        a) NOT be silent (visible text, not just a typing indicator)
+        b) NOT start with "received: " (bare receipt = PATCH)
+        c) Be assistant-voice text (e.g., references "note it", "schedule it")
+    - The operator UI shows a new inbound row AND a new outbound row.
 
-Step 5 — verify two-turn interleaving in session store
-  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | jq '.counts'
-  Expect: counts.inbound == N+2, counts.outbound == N+2, counts.total == 2N+4
+Step 3 — verify COMPLETION after first exchange
   curl -s "https://ali-ai.<account>.workers.dev/session/latest" | \
-    jq '.items[0:4] | map({direction, text})'
+    jq '.counts'
+  Expect: inbound = N_in + 1, outbound = N_out + 1, total = N_in + N_out + 2
+
+  Verify outbound text in session store:
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | \
+    jq '[.items[] | select(.direction=="outbound")] | .[0] | {text, chat_id}'
+  Expect: non-empty text string; not "received: ..."; chat_id = your chat id.
+
+  COMPLETION check: if outbound count did not increase, the loop did not close
+  — PATCH condition per C2.
+
+Step 4 — SECOND text exchange
+  Action: in the Telegram client, send "hello" to the bot.
+  Expect (within ~2 s):
+    - A DIFFERENT bot reply than step 2 appears in the Telegram thread.
+      Same reply for both messages = static ack = PATCH per C4.
+    - The operator UI shows a second in/out pair appended to the trail.
+
+Step 5 — verify two-turn interleaving and COMPLETION
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | \
+    jq '.counts'
+  Expect: inbound = N_in + 2, outbound = N_out + 2, total = N_in + N_out + 4
+
+  Verify item ordering (newest-first from /session/latest):
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | \
+    jq '[.items[0:4] | .[] | {direction, text}]'
   Expect (newest-first): outbound, inbound, outbound, inbound.
-  When reversed, the chronological order is in:1, out:1, in:2, out:2.
+  Reversed (chronological): in:1, out:1, in:2, out:2. (C4)
 
 Step 6 — verify session_id stability
-  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | jq '.session.session_id'
-  Expect: identical to the session_id captured in Step 1.
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | \
+    jq '.session.session_id'
+  Expect: identical to the session_id S0 captured in step 1.
+  If session_id changed, the isolate was recycled mid-demo — note but
+  this is a Worker cold-start event, not a code bug.
 
-Step 7 — UI cross-check
+Step 7 — FAILURE STATE proof step
+  Simulate a failed exchange by sending a webhook POST with a wrong secret:
+  curl -s -X POST \
+    "https://ali-ai.<account>.workers.dev/telegram/webhook" \
+    -H "Content-Type: application/json" \
+    -H "X-Telegram-Bot-Api-Secret-Token: WRONG-SECRET" \
+    -d '{"update_id": 9999999, "message": {"message_id": 999,
+         "date": 1745000000, "text": "this should not appear",
+         "chat": {"id": 1, "type": "private"},
+         "from": {"id": 1, "is_bot": false, "first_name": "t"}}}'
+  Expect HTTP response: 200, body: {"ok": true}
+  Expect session store: counts UNCHANGED (no inbound, no outbound recorded).
+
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | \
+    jq '.counts'
+  Expect: still N_in + 2, N_out + 2 from step 5 — secret mismatch is a
+          silent drop at the route level; no partial state leaks. (C5)
+
+Step 8 — UI cross-check
   In the operator UI, confirm:
-    - both inbound texts appear with the chat user identity
-    - both outbound replies appear with the bot identity
-    - the order matches Step 5
-    - last-event timestamp updates after each turn
+    - Both inbound messages appear with the user identity.
+    - Both outbound replies appear with distinct text (not identical).
+    - The last-event timestamp updates after each successful exchange.
+    - No stale or duplicate rows from the failed step 7 attempt.
 
 --------------------------------------------------------------------------
 5. ACCEPTANCE GATES (for S2 checkpoint)
 --------------------------------------------------------------------------
 PASS conditions (all must hold):
-  [ ] /worker-wb/test/telegram-text-reply-default.test.ts exists and the
-      10 cases above all pass locally.
+  [ ] /worker-wb/test/telegram-text-reply-completion.test.ts exists and
+      all 19 cases pass locally.
   [ ] /job_site/text_reply_demo_checklist.txt exists (this file).
-  [ ] Live demo Steps 2-5 succeed for two consecutive Telegram messages.
-  [ ] Outbound replies are non-empty AND vary across the two turns.
+  [ ] /job_site/text_failure_modes.txt exists.
+  [ ] Live demo steps 2-5 succeed: two consecutive Telegram messages each
+      produce a completed reply visible in the Telegram thread.
+  [ ] Outbound replies are non-empty, non-receipt, and differ across turns.
   [ ] Session store shows the in:1, out:1, in:2, out:2 interleaving.
   [ ] session_id is stable across both turns.
-  [ ] Repo mirrored, committed, and pushed to the designated branch.
+  [ ] Step 7 (bad secret) leaves session counts unchanged.
+  [ ] Repo committed and pushed to the designated branch.
 
 PATCH conditions (any one fails):
-  [ ] Worker returns 200 but no outbound row is recorded
-      (receipt-only ack — PATCH per build sheet).
-  [ ] Outbound text is empty, missing, or identical for both turns.
+  [ ] Worker returns 200 but no outbound row is recorded after a
+      successful exchange (inbound-without-outbound = C2 failure).
+  [ ] Outbound text starts with "received: " (bare receipt, not a
+      completed assistant reply = C1 failure).
+  [ ] Outbound text is empty or identical for both turns.
   [ ] Session store shows fewer than 2 outbound rows after 2 inbounds.
-  [ ] UI never reflects the second turn within one poll interval.
+  [ ] /session/latest does not reflect the second exchange within one
+      poll interval.
   [ ] session_id changes mid-conversation.
+  [ ] Bad-secret POST leaves a partial record in the session store.
 
 --------------------------------------------------------------------------
-6. ISSUES / FLAGS (for Foreman A and Foreman B awareness)
+6. ISSUES / FLAGS
 --------------------------------------------------------------------------
 - Build sheet cites /job_site/factory-manual-v1.1.txt; file on disk is
-  /job_site/factory-manual-v1.11.txt (v1.11 lean). Treated as the same
-  active manual per PRECEDENCE LAW. Flag only.
-- Current /worker-wb/src/routes/telegram-webhook.ts builds the reply
-  with `received: <preview>` (see telegram-webhook.ts:36-39). That
-  string IS non-empty AND varies with input text, so the simulator and
-  the live path agree on R3 today. Worker A may upgrade the reply
-  builder to a real assistant response without invalidating any test in
-  the companion file — the contract is reply-by-default + per-message
-  variance, not a specific reply string.
-- The companion test currently uses a pure `simulateRoundTrip` function
-  in place of live imports because the repository has no installed test
-  runner with bundler-style resolution (`@cloudflare/vitest-pool-workers`,
-  vitest, or tsx). When such a runner is added, swap the simulator for
-  live imports of the route + session-store. Fixtures stay unchanged.
-- Stage 2 companion artifact /job_site/telegram_text_roundtrip_checklist.txt
-  remains valid for the original S2 round-trip contract; this Stage 3
-  file narrows the focus to the reply-by-default invariant across two
-  consecutive messages and does not supersede it.
+  /job_site/factory-manual-v1.11.txt (v1.11 lean). Pre-existing drift;
+  treated as same active manual per PRECEDENCE LAW.
+- The companion test imports real source modules via
+  --loader ./test/ts-resolve.mjs. This is verified to work on Node 22+
+  with --experimental-strip-types. All 19 cases pass.
+- The sendTelegramMessage stub (outbound.ts) synthesizes a message_id
+  from Date.now() / 1000 and never reaches api.telegram.org. This means
+  the Telegram thread shows bot replies in the demo ONLY if the Worker
+  is live and registered against a real bot token. In a demo without a
+  live Telegram bot, the session store will still record both inbound and
+  outbound, but the Telegram thread will not receive the reply.
+- The prior Stage 3 artifact
+  (/worker-wb/test/telegram-text-reply-default.test.ts) remains valid
+  for the "reply by default" contract and is not superseded by this file.
+  Both test files coexist; they cover complementary contracts (shape vs.
+  completeness).
 
 --------------------------------------------------------------------------
 7. ARTIFACT SELF-CHECK
 --------------------------------------------------------------------------
-expected_artifact_1: /worker-wb/test/telegram-text-reply-default.test.ts  — present
-expected_artifact_2: /job_site/text_reply_demo_checklist.txt              — present (this file)
-local_test_run:      10 passed, 0 failed (10 total)
-repo_mirror_required: yes — written to /home/user/ALI-ai working tree
-commit_required:      yes — to be committed on claude/verify-api-endpoints-dxGjT
-push_required:        yes — to be pushed to origin
+expected_artifact_1: /worker-wb/test/telegram-text-reply-completion.test.ts — present
+expected_artifact_2: /job_site/text_reply_demo_checklist.txt               — present (this file)
+expected_artifact_3: /job_site/text_failure_modes.txt                      — see next artifact
+local_test_run:      19 passed, 0 failed (19 total)
+repo_mirror_required: yes
+commit_required:      yes
+push_required:        yes
