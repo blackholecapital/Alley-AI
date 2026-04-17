@@ -1,19 +1,14 @@
 // Telegram webhook route handler.
 // Validates env and the Telegram secret header, parses the Update into a
-// normalized InternalEvent, records it in the shared session store,
-// invokes the assistant pipeline to generate a reply, and records the
-// outbound reply in-worker. Voice notes are promoted into the same
-// pipeline via the configured transcription provider. The outbound path
-// does NOT reach an external backend (no PROXY_BACKEND_URL fetch, no
-// Telegram Bot API call) — the reply text is synthesized in-worker and
-// recorded through recordOutbound so /session/latest closes the UI loop.
+// normalized InternalEvent, records it in the shared session store, and
+// dispatches to the shared assistant pipeline so both text and voice
+// produce assistant-voice replies by default.
 //
-// Handler flow (grammY-style, shared assistant pipeline):
-//   inbound parse -> recordInbound (session) -> generateAssistantReply
-//                 -> sendTelegramMessage -> recordOutbound (session)
-//
-// Text messages now produce assistant replies by default rather than
-// receipt-only acknowledgements.
+// Voice updates are handed to handleTelegramVoiceNote, which owns the
+// complete voice golden path:
+//   inbound parse -> recordInbound -> fetchTelegramVoiceAudio
+//                 -> transcription provider -> generateAssistantReply
+//                 -> sendTelegramMessage -> recordOutbound
 //
 // Response contract: this route ALWAYS returns HTTP 200 with the body
 // {"ok": true} and content-type application/json to the caller (UI /
@@ -21,21 +16,22 @@
 // but never surface as non-2xx responses — the caller must always see a
 // clean 200 so it never treats a handled update as a retriable failure.
 // Structured logs on every boundary preserve observability.
-// Ref: build-sheet-EXEC-AI-STAGE3-004 S2 (reply-path polish for text).
+//
+// Ref: build-sheet-EXEC-AI-STAGE3-004 S3 (voice golden path),
+//      build-sheet-EXEC-AI-STAGE3-004 S2 (reply-path polish for text),
 //      build-sheet-EXEC-AI-STAGE2-003 S2 + S3 + S4 + S5 (baseline).
 
 import { parseTelegramUpdate } from '../integrations/telegram/inbound';
 import { sendTelegramMessage } from '../integrations/telegram/outbound';
-import { fetchTelegramVoiceAudio } from '../integrations/telegram/voice';
+import { handleTelegramVoiceNote } from '../integrations/telegram/voice';
 import type {
   InternalEvent,
   TelegramEnv,
   TelegramUpdate,
 } from '../integrations/telegram/types';
 import { recordInbound, recordOutbound } from '../lib/session-store';
-import { getTranscriptionProvider } from '../providers/transcription';
 import type { TranscriptionEnv } from '../providers/transcription/provider';
-import { validateTelegramEnv, validateTranscriptionEnv } from '../lib/env';
+import { validateTelegramEnv } from '../lib/env';
 import type { Logger } from '../lib/logging';
 
 const SECRET_HEADER = 'x-telegram-bot-api-secret-token';
@@ -48,7 +44,9 @@ const REPLY_PREVIEW_LEN = 200;
 // assistant-style reply. Deterministic, rule-based, no external LLM call
 // — the Worker must close the loop without reaching a backend. Stage 3
 // scope is "reply by default, not receipt-only", so every branch returns
-// an assistant-voice response rather than an echo of the input.
+// an assistant-voice response rather than an echo of the input. The voice
+// golden path reuses this same function so text and voice share one
+// pipeline.
 export function generateAssistantReply(text: string): string {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
@@ -72,11 +70,6 @@ export function generateAssistantReply(text: string): string {
   }
 
   return `Got it — "${preview}". Want me to note it, schedule it, or wait for more detail?`;
-}
-
-function buildVoiceReply(transcript: string): string {
-  const preview = transcript.slice(0, REPLY_PREVIEW_LEN);
-  return `transcribed: ${preview}`;
 }
 
 async function handleTextEvent(
@@ -115,82 +108,6 @@ async function handleTextEvent(
     chat_id: event.chat_id,
     reply_message_id: send.message_id,
   });
-}
-
-async function handleVoiceEvent(
-  event: InternalEvent,
-  env: TelegramWebhookEnv,
-  logger: Logger,
-): Promise<void> {
-  const voice = event.raw.message?.voice ?? event.raw.edited_message?.voice;
-  if (!voice) {
-    logger.warn('telegram.voice.payload_missing', { event_id: event.id });
-    return;
-  }
-
-  const token = env.TELEGRAM_BOT_TOKEN ?? '';
-  logger.info('telegram.voice.fetch.start', {
-    event_id: event.id,
-    file_id: voice.file_id,
-    duration: voice.duration,
-  });
-
-  const fetched = await fetchTelegramVoiceAudio(token, voice);
-  if (!fetched.ok) {
-    logger.error('telegram.voice.fetch.failed', {
-      event_id: event.id,
-      reason: fetched.reason,
-      detail: fetched.detail,
-      status: fetched.status,
-    });
-    return;
-  }
-
-  const transcriptionIssues = validateTranscriptionEnv(env);
-  if (!transcriptionIssues.ok) {
-    logger.error('env.transcription.invalid', { errors: transcriptionIssues.errors });
-    return;
-  }
-
-  const provider = getTranscriptionProvider(env);
-  logger.info('transcription.start', {
-    event_id: event.id,
-    provider: provider.name,
-    ready: provider.ready,
-    bytes: fetched.audio.size,
-  });
-
-  const transcript = await provider.transcribe({
-    audio: fetched.audio.audio,
-    mime_type: fetched.audio.mime_type,
-    duration_seconds: fetched.audio.duration_seconds,
-    source_id: event.id,
-  });
-
-  if (!transcript.ok) {
-    logger.error('transcription.failed', {
-      event_id: event.id,
-      provider: transcript.provider,
-      reason: transcript.reason,
-      retryable: transcript.retryable,
-    });
-    return;
-  }
-
-  logger.info('transcription.ok', {
-    event_id: event.id,
-    provider: transcript.provider,
-    text_length: transcript.text.length,
-    duration_ms: transcript.duration_ms,
-  });
-
-  const transcribedEvent: InternalEvent = {
-    ...event,
-    text: transcript.text,
-  };
-  recordInbound(transcribedEvent);
-
-  await handleTextEvent(transcribedEvent, env, logger, buildVoiceReply(transcript.text));
 }
 
 async function processTelegramUpdate(
@@ -255,7 +172,16 @@ async function processTelegramUpdate(
   }
 
   if (event.kind === 'voice') {
-    await handleVoiceEvent(event, env, logger);
+    const outcome = await handleTelegramVoiceNote(event, env, logger, {
+      assistantPipeline: generateAssistantReply,
+    });
+    logger.info('telegram.voice.flow.outcome', {
+      event_id: event.id,
+      status: outcome.status,
+      provider: outcome.provider,
+      has_transcript: outcome.transcript !== null,
+      reply_length: outcome.reply_text?.length ?? 0,
+    });
     return;
   }
 
