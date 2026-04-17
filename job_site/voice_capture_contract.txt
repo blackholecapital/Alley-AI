@@ -1,0 +1,138 @@
+voice_capture_contract.txt
+EXEC-AI-STAGE4-001 | S3 | Worker A | Voice Capture Contract
+
+PURPOSE:
+Defines the browser mic permission flow, recording state machine, stop/send
+behavior, and all error-handling states for the operator-shell voice capture UI.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STATE MACHINE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  idle        — Default. No capture in progress.
+                Talk button visible and enabled.
+
+  requesting  — getUserMedia() call in flight.
+                Browser permission prompt may appear.
+                Talk button hidden; no cancel available at this point.
+
+  recording   — Mic stream open; MediaRecorder accumulating audio chunks.
+                Stop & Send button visible. Cancel button visible.
+
+  processing  — MediaRecorder stopped; audio blob uploading to /voice/capture.
+                All buttons hidden. Status badge animates.
+
+  sent        — Upload complete. ok=true or ok=false result present.
+                Result message displayed. Auto-resets to idle after 3 seconds.
+
+  denied      — Permission was rejected by user or OS.
+                Covers: NotAllowedError, PermissionDeniedError,
+                        NotFoundError, DevicesNotFoundError.
+                Talk button re-enabled (allows retry).
+                Clear error message displayed.
+
+  unsupported — navigator.mediaDevices or MediaRecorder not present.
+                Permanent for the page session.
+                Talk button disabled; message shown.
+                Requires HTTPS for getUserMedia on most browsers.
+
+  error       — Unexpected runtime failure (getUserMedia or MediaRecorder init).
+                Talk button re-enabled (allows retry).
+                Error detail message displayed.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VALID STATE TRANSITIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  idle        → requesting   startCapture() called, isSupported()=true
+  idle        → unsupported  startCapture() called, isSupported()=false
+  requesting  → recording    getUserMedia resolved
+  requesting  → denied       NotAllowedError / PermissionDeniedError / NotFoundError
+  requesting  → error        any other getUserMedia rejection
+  recording   → processing   stopAndSend() called
+  recording   → idle         cancelCapture() called
+  processing  → sent         sendAudio() resolved (ok or network error)
+  sent        → idle         automatic after 3 s
+  denied      → requesting   startCapture() called again (retry allowed)
+  error       → requesting   startCapture() called again (retry allowed)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ENDPOINT CONTRACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Method:  POST /voice/capture
+  Body:    multipart/form-data
+    Field: audio       (Blob — audio/webm, audio/ogg, or audio/mp4)
+    Name:  recording.webm  (fallback filename)
+
+  Success response (HTTP 200):
+    { "ok": true, "session_id": "<string-or-null>" }
+
+  Failure response (HTTP 4xx / 5xx or malformed body):
+    { "ok": false, "error": { "code": "<string>", "message": "<string>" } }
+
+  Network / fetch() rejection:
+    Caught internally; mapped to { ok: false, error: { code: "network", ... } }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ERROR HANDLING RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  NotAllowedError / PermissionDeniedError  → state: denied, standard message
+  NotFoundError / DevicesNotFoundError     → state: denied, "No microphone found."
+  Any other getUserMedia error             → state: error, err.message
+  MediaRecorder constructor throws         → state: error, "MediaRecorder initialisation failed."
+  HTTP non-2xx from /voice/capture         → state: sent, ok=false, code=http_<status>
+  Non-{ok:true} JSON body                  → state: sent, ok=false, code=bad_response
+  fetch() network rejection                → state: sent, ok=false, code=network
+
+  In all error exit paths the mic stream is stopped (getTracks().stop()).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MIME TYPE PREFERENCE ORDER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. audio/webm;codecs=opus   (Chrome, Edge)
+  2. audio/webm               (Chrome, Edge fallback)
+  3. audio/ogg;codecs=opus    (Firefox)
+  4. audio/ogg                (Firefox fallback)
+  5. audio/mp4                (Safari)
+
+  First type passing MediaRecorder.isTypeSupported() is used.
+  If none match, no mimeType option is passed (browser default).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+UNSUPPORTED BROWSER DETECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Required conditions (all must be true):
+    navigator.mediaDevices != null
+    typeof navigator.mediaDevices.getUserMedia === 'function'
+    typeof MediaRecorder !== 'undefined'
+
+  If any condition fails → state: unsupported (permanent for page session).
+  getUserMedia requires HTTPS (or localhost) on Chrome, Edge, Firefox.
+  Served over plain HTTP → likely to fail with NotAllowedError or be unavailable.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RECORDING LIFECYCLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  startCapture()   — requests getUserMedia, opens stream, starts MediaRecorder
+  stopAndSend()    — stops MediaRecorder, closes stream tracks, POSTs blob
+  cancelCapture()  — stops MediaRecorder, closes stream tracks, discards blob
+
+  Stream tracks are stopped in every exit path:
+    stopAndSend → _stopStream called before sendAudio
+    cancelCapture → _stopStream called immediately
+    getUserMedia error → no stream to stop
+    MediaRecorder init error → _stopStream called before state change
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ARTIFACTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  /apps/operator-shell/src/ui/voice-capture.js    — state machine + API module
+  /apps/operator-shell/src/ui/index.html          — voice footer UI + inline wiring
+  /apps/operator-shell/src/ui/session.contract.ts — VoiceCaptureState type added
+  /job_site/voice_capture_contract.txt            — this file
