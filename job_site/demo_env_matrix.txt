@@ -1,141 +1,217 @@
-DEMO ENV MATRIX — EXEC-AI-STAGE2-003 | S5 | WORKER A
+DEMO ENV MATRIX — EXEC-AI-STAGE3-004 | S6 | WORKER B
 =====================================================
-Scope: environment variables required or recognized by the worker-wb
-Cloudflare Worker for the Stage 2 demo loop (Telegram text + UI + voice).
-Lists canonical key names, severity if missing, and how to set each.
+Generated: 2026-04-17
+Branch:    claude/calendar-single-action-tests-o8NmW
+Scope:     Environment variables required or recognized by the worker-wb
+           Cloudflare Worker for the Stage 3 demo loop.
+           Extends Stage 2 matrix (EXEC-AI-STAGE2-003 S5 Worker A) with
+           CALENDAR_PROVIDER and CALENDAR_TIMEZONE_OFFSET_MINUTES.
+           Three demo paths covered: text, voice, calendar.
 
-----------------------------------------------------------------
+References consulted:
+  /job_site/factory-manual-v1.11.txt  (active as v1.11 lean)
+  /job_site/worker-execution-manual-v1.1.txt
+  /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+  /worker-wb/src/lib/env.ts
+  /worker-wb/src/integrations/calendar/provider.ts
+  /worker-wb/wrangler.jsonc
+
+NOTE: /job_site/factory-manual-v1.1.txt is on disk as
+      /job_site/factory-manual-v1.11.txt. Same active manual per
+      PRECEDENCE LAW; flag only.
+
+----------------------------------------------------------
 1. RUNTIME PATHS AND THEIR ENV DEPENDENCIES
-----------------------------------------------------------------
-/telegram/webhook  — Telegram inbound + outbound text and voice
+----------------------------------------------------------
+/telegram/webhook
    requires:   TELEGRAM_BOT_TOKEN        (secret)
                TELEGRAM_WEBHOOK_SECRET   (secret)
-   optional:   TRANSCRIPTION_PROVIDER    (var)   "deepgram" | "noop"
-               DEEPGRAM_API_KEY          (secret, when provider=deepgram)
+   optional:   TRANSCRIPTION_PROVIDER    (var)    "deepgram" | "noop"
+               DEEPGRAM_API_KEY          (secret, required when provider=deepgram)
                DEEPGRAM_MODEL            (var, default "nova-2")
 
-/session/latest    — Operator UI state surface
+/session/latest
    requires:   (none)
    optional:   (none)
 
-404 / unmatched    — catch-all
+/calendar/status
+   requires:   (none — route always up; returns not-ready gracefully)
+   optional:   CALENDAR_PROVIDER               (var/secret)
+               CALENDAR_TIMEZONE_OFFSET_MINUTES (var)
+
+/health
+   requires:   (none)
+   optional:   (none)
+
+404 / unmatched
    requires:   (none)
 
-----------------------------------------------------------------
-2. KEYS
-----------------------------------------------------------------
-KEY                        KIND     REQUIRED FOR                SEVERITY IF MISSING
--------------------------  -------  --------------------------  ------------------------
-TELEGRAM_BOT_TOKEN         secret   outbound sendMessage,       error
-                                    voice media download
-TELEGRAM_WEBHOOK_SECRET    secret   inbound webhook verify      error
-TRANSCRIPTION_PROVIDER     var      provider selection          none when unset; defaults
-                                                                 to noop (warn) or deepgram
-                                                                 when DEEPGRAM_API_KEY is set
-DEEPGRAM_API_KEY           secret   voice transcription path    error when provider=deepgram;
-                                                                 warn when provider unset
-                                                                 (voice path falls through
-                                                                 to noop = readable failure)
-DEEPGRAM_MODEL             var      deepgram tuning             none; defaults to "nova-2"
-ENVIRONMENT                var      log enrichment              none; defaults to "unknown"
-WORKER_VERSION             var      log enrichment              none; defaults to "unknown"
-LOG_LEVEL                  var      log threshold               none; defaults to "info"
-                                                                 (values: debug | info |
-                                                                 warn | error)
+----------------------------------------------------------
+2. FULL KEY TABLE
+----------------------------------------------------------
+KEY                              KIND     REQUIRED FOR               SEVERITY IF MISSING
+-------------------------------  -------  -------------------------  --------------------------
+TELEGRAM_BOT_TOKEN               secret   outbound sendMessage,      error — 500 config_error
+                                          voice media download        on /telegram/webhook
+TELEGRAM_WEBHOOK_SECRET          secret   inbound webhook verify     error — 500 config_error
+                                                                       on /telegram/webhook
+TRANSCRIPTION_PROVIDER           var      provider selection         none when unset; voice path
+                                          "deepgram" | "noop"         degrades to noop (readable
+                                                                       failure message)
+DEEPGRAM_API_KEY                 secret   voice transcription        error when provider=deepgram;
+                                                                       warn when unset with no
+                                                                       explicit provider
+DEEPGRAM_MODEL                   var      deepgram model tuning      none; defaults to "nova-2"
+CALENDAR_PROVIDER                var/     calendar action dispatch   none — /calendar/status
+                                 secret   "demo" only in Stage 3      returns provider_not_
+                                                                       configured; ok=false with
+                                                                       human-readable reply;
+                                                                       worker stays up
+CALENDAR_TIMEZONE_OFFSET_MINUTES var      today-window computation   none; defaults to 0 (UTC);
+                                          integer minutes from UTC    out-of-range or non-numeric
+                                          range: -840..840            silently clamps to 0
+ENVIRONMENT                      var      log enrichment             none; defaults to "unknown"
+WORKER_VERSION                   var      log enrichment             none; defaults to "unknown"
+LOG_LEVEL                        var      log threshold              none; defaults to "info"
+                                          "debug"|"info"|"warn"|"error"
 
-----------------------------------------------------------------
+----------------------------------------------------------
 3. WHERE TO SET EACH
-----------------------------------------------------------------
-a) Secrets (NEVER commit to wrangler.jsonc)
+----------------------------------------------------------
+a) Secrets (NEVER commit to wrangler.jsonc or source control)
 
-   production:
+   Production (wrangler CLI):
      cd worker-wb
      wrangler secret put TELEGRAM_BOT_TOKEN
      wrangler secret put TELEGRAM_WEBHOOK_SECRET
-     wrangler secret put DEEPGRAM_API_KEY     # only if voice transcription is live
+     wrangler secret put DEEPGRAM_API_KEY          # voice transcription
+     wrangler secret put CALENDAR_PROVIDER         # value: demo
 
-   local dev:
-     /worker-wb/.dev.vars  (gitignored; do not commit)
-       TELEGRAM_BOT_TOKEN=<token>
-       TELEGRAM_WEBHOOK_SECRET=<secret>
-       DEEPGRAM_API_KEY=<key>
+   Local dev (/worker-wb/.dev.vars — gitignored, never commit):
+     TELEGRAM_BOT_TOKEN=<token>
+     TELEGRAM_WEBHOOK_SECRET=<secret>
+     DEEPGRAM_API_KEY=<key>
+     CALENDAR_PROVIDER=demo
 
-b) Plain vars (safe in wrangler.jsonc)
+b) Plain vars (safe in wrangler.jsonc → "vars" block)
 
-   Edit /worker-wb/wrangler.jsonc -> "vars" block.
-   Current vars block:
+   Current vars in /worker-wb/wrangler.jsonc:
      ENVIRONMENT       = "development"
      WORKER_VERSION    = "0.1.0"
      LOG_LEVEL         = "info"
-     PROXY_BACKEND_URL = "http://localhost:5000"   (not consumed in S2)
+     PROXY_BACKEND_URL = "http://localhost:5000"  (unused in Stage 3)
+
    Add as needed:
-     TRANSCRIPTION_PROVIDER = "deepgram"
-     DEEPGRAM_MODEL         = "nova-2"
+     TRANSCRIPTION_PROVIDER           = "deepgram"
+     DEEPGRAM_MODEL                   = "nova-2"
+     CALENDAR_TIMEZONE_OFFSET_MINUTES = "0"   # UTC; adjust per operator TZ
 
-----------------------------------------------------------------
+   NOTE: CALENDAR_PROVIDER should be set as a secret, not a var, to
+   establish the correct pattern for future providers that carry API keys.
+   "demo" is technically safe as a var but the secret pattern is preferred.
+
+----------------------------------------------------------
 4. VALIDATION BEHAVIOR
-----------------------------------------------------------------
-src/lib/env.ts exposes validators; the webhook route calls them per-request
-and returns explicit error responses instead of silent failures.
+----------------------------------------------------------
+src/lib/env.ts — validateTelegramEnv() / validateTranscriptionEnv():
+   Called per-request by /telegram/webhook. Returns EnvValidation
+   (ok:bool, errors:[], warnings:[]). Callers return 500 config_error
+   on any errors; warnings are logged but allow the request to proceed.
 
-validateTelegramEnv(env)
-   - TELEGRAM_BOT_TOKEN missing       -> error   -> 500 config_error on /telegram/webhook
-   - TELEGRAM_WEBHOOK_SECRET missing  -> error   -> 500 config_error on /telegram/webhook
+   validateTelegramEnv:
+     TELEGRAM_BOT_TOKEN missing       → error → 500 on /telegram/webhook
+     TELEGRAM_WEBHOOK_SECRET missing  → error → 500 on /telegram/webhook
 
-validateTranscriptionEnv(env)
-   - TRANSCRIPTION_PROVIDER=deepgram + DEEPGRAM_API_KEY missing
-                                       -> error   -> 500 config_error on voice path only
-   - TRANSCRIPTION_PROVIDER unset + DEEPGRAM_API_KEY unset
-                                       -> warn    -> voice path logs warn and uses noop
-                                                      adapter (returns readable failure)
-   - TRANSCRIPTION_PROVIDER is unknown
-                                       -> error   -> 500 config_error on voice path only
+   validateTranscriptionEnv:
+     provider=deepgram + no API key   → error → 500 on voice path only
+     provider=noop or unset           → warn  → voice path degrades safely
+     provider=unknown string          → error → 500 on voice path only
 
-Text-only round trip (no voice) remains functional when transcription env is
-unset; only the voice path degrades.
+src/integrations/calendar/provider.ts — getCalendarProvider(env):
+   Called per-request by /calendar/status. Does NOT throw. Returns:
+     DemoCalendarProvider (ready=true) when CALENDAR_PROVIDER="demo"
+     UnconfiguredCalendarProvider (ready=false, reason=provider_not_configured)
+       when CALENDAR_PROVIDER is unset, empty, "none", or "unconfigured"
+     not-ready object (reason=provider_unsupported)
+       when CALENDAR_PROVIDER is any other string (e.g. "google")
 
-----------------------------------------------------------------
-5. DEMO CAPABILITY MATRIX
-----------------------------------------------------------------
+   /calendar/status always returns HTTP 200. Handler returns ok=false with
+   human-readable reply_text when provider not ready. Isolate never crashes.
+
+----------------------------------------------------------
+5. STAGE 3 DEMO CAPABILITY MATRIX
+----------------------------------------------------------
 CAPABILITY                        MINIMUM ENV REQUIRED
---------------------------------  --------------------------------------------
-Telegram text round trip          TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
-UI session transcript at          (none — always available)
-  /session/latest
-Telegram voice -> transcript      TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET,
-  -> text pipeline                DEEPGRAM_API_KEY (+ optional
-                                  TRANSCRIPTION_PROVIDER=deepgram)
-Voice visible safe failure        TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
-  (no transcription configured)   (voice arrives, records inbound, returns
-                                  upstream_error with reason to the caller and
-                                  leaves an inbound item with text=null so the
-                                  UI can show an unresolved voice)
+--------------------------------  -------------------------------------------
+Telegram text round trip          TELEGRAM_BOT_TOKEN
+                                  TELEGRAM_WEBHOOK_SECRET
 
-----------------------------------------------------------------
-6. OBSERVABILITY
-----------------------------------------------------------------
-wrangler.jsonc has "observability.enabled": true. All logs emitted through
-src/lib/logging.ts are captured by Cloudflare Workers observability. Each line
-is JSON with at minimum:
-   ts, level, event, correlation_id, env, version, method, path
+UI session transcript             (none — always available)
+at /session/latest
 
-Correlation IDs are taken from request headers in priority order:
-   cf-ray -> x-correlation-id -> x-request-id
-otherwise generated via crypto.randomUUID().
+Telegram voice → text pipeline    TELEGRAM_BOT_TOKEN
+                                  TELEGRAM_WEBHOOK_SECRET
+                                  DEEPGRAM_API_KEY
+                                  (TRANSCRIPTION_PROVIDER=deepgram optional)
 
-Every response carries the same correlation_id both in the body (under
-"correlation_id") and as an `x-correlation-id` response header so operators
-can match UI failures to log lines without guessing.
+Voice visible safe failure        TELEGRAM_BOT_TOKEN
+(no transcription configured)     TELEGRAM_WEBHOOK_SECRET
+                                  (voice records inbound, readable failure,
+                                   UI shows voice badge with null text)
 
-----------------------------------------------------------------
-7. OPERATOR CHECKLIST BEFORE DEMO
-----------------------------------------------------------------
-[ ] wrangler whoami succeeds
-[ ] wrangler secret put TELEGRAM_BOT_TOKEN        (prod)
-[ ] wrangler secret put TELEGRAM_WEBHOOK_SECRET   (prod)
-[ ] (optional) wrangler secret put DEEPGRAM_API_KEY
-[ ] wrangler.jsonc vars block reviewed (ENVIRONMENT, LOG_LEVEL, etc.)
-[ ] cd worker-wb && npm run deploy
-[ ] Telegram setWebhook points to the deployed route with secret_token set
-    to the exact TELEGRAM_WEBHOOK_SECRET value
-[ ] Operator UI can reach /session/latest publicly (no Access gate)
+Calendar action — happy path      CALENDAR_PROVIDER=demo
+(CALENDAR_LIST_TODAY)             (no external API key required)
+
+Calendar action — safe failure    (none — route always up;
+(provider not configured)          omit CALENDAR_PROVIDER entirely)
+
+Calendar status in UI             CALENDAR_PROVIDER=demo for green state
+                                  (UI polls /calendar/status every 5 s)
+
+----------------------------------------------------------
+6. MINIMAL DEMO SETUP (fewest secrets)
+----------------------------------------------------------
+All three Stage 3 paths live (text + voice + calendar):
+
+  wrangler secret put TELEGRAM_BOT_TOKEN        → <bot token>
+  wrangler secret put TELEGRAM_WEBHOOK_SECRET   → <webhook secret>
+  wrangler secret put DEEPGRAM_API_KEY          → <deepgram key>
+  wrangler secret put CALENDAR_PROVIDER         → demo
+
+  cd worker-wb && npm run deploy
+
+  4 secrets total. No API keys for calendar (demo is built-in).
+  No wrangler.jsonc changes required.
+
+Text only (no voice, no calendar):
+  wrangler secret put TELEGRAM_BOT_TOKEN
+  wrangler secret put TELEGRAM_WEBHOOK_SECRET
+  cd worker-wb && npm run deploy
+
+----------------------------------------------------------
+7. OBSERVABILITY
+----------------------------------------------------------
+wrangler.jsonc has "observability.enabled": true. All logs via
+src/lib/logging.ts are captured. Each JSON line carries at minimum:
+  ts, level, event, correlation_id, env, version, method, path
+
+Correlation IDs flow: cf-ray → x-correlation-id → x-request-id →
+crypto.randomUUID(). Same ID appears in response body and
+x-correlation-id header.
+
+----------------------------------------------------------
+8. OPERATOR PRE-DEMO CHECKLIST
+----------------------------------------------------------
+  [ ] wrangler whoami succeeds (correct account / zone)
+  [ ] wrangler secret put TELEGRAM_BOT_TOKEN
+  [ ] wrangler secret put TELEGRAM_WEBHOOK_SECRET
+  [ ] wrangler secret put DEEPGRAM_API_KEY          (voice path)
+  [ ] wrangler secret put CALENDAR_PROVIDER         (value: demo)
+  [ ] wrangler.jsonc vars reviewed (ENVIRONMENT, LOG_LEVEL)
+  [ ] cd worker-wb && npm run deploy
+  [ ] Telegram setWebhook → deployed URL, secret_token = TELEGRAM_WEBHOOK_SECRET
+  [ ] curl -s https://<worker>.workers.dev/health | jq .ok  → true
+  [ ] curl -s https://<worker>.workers.dev/calendar/status \
+        | jq .provider.ready  → true
+  [ ] Operator UI at root ("/"):
+      Status bar shows Core: ok | Calendar: demo ready
