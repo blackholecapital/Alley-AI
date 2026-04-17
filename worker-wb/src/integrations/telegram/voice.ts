@@ -23,11 +23,12 @@
 
 import type { InternalEvent, TelegramEnv, TelegramVoice } from './types';
 import { sendTelegramMessage } from './outbound';
-import { recordInbound, recordOutbound } from '../../lib/session-store';
+import { recordInbound, recordOutbound, recordUiInbound, getLatest } from '../../lib/session-store';
 import { getTranscriptionProvider } from '../../providers/transcription';
 import type { TranscriptionEnv } from '../../providers/transcription/provider';
 import { validateTranscriptionEnv } from '../../lib/env';
 import type { Logger } from '../../lib/logging';
+import { errorResponse, jsonResponse } from '../../lib/errors';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
@@ -372,4 +373,139 @@ export async function handleTelegramVoiceNote(
     transcript: transcript.text,
     provider: transcript.provider,
   };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Browser voice capture handler — POST /voice/capture
+// ────────────────────────────────────────────────────────────────────
+//
+// Receives multipart/form-data from the browser operator UI, validates
+// the audio blob, and forwards it into the shared transcription pipeline.
+// No reply handling: caller polls /session/latest for final state.
+// Contract: /job_site/voice_capture_contract.txt (ENDPOINT CONTRACT)
+
+const ACCEPTED_AUDIO_MIME_BASES = ['audio/webm', 'audio/ogg', 'audio/mp4'];
+
+function isAcceptedAudioMime(type: string): boolean {
+  const base = type.split(';')[0]!.trim().toLowerCase();
+  return ACCEPTED_AUDIO_MIME_BASES.some((p) => base === p);
+}
+
+export async function handleVoiceCapture(
+  request: Request,
+  env: TranscriptionEnv,
+  logger: Logger,
+): Promise<Response> {
+  if (request.method !== 'POST') {
+    logger.warn('voice.capture.method_not_allowed', { method: request.method });
+    return errorResponse('method_not_allowed', {
+      message: 'POST required',
+      correlationId: logger.correlationId,
+    });
+  }
+
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch (err) {
+    logger.warn('voice.capture.parse_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return errorResponse('bad_request', {
+      message: 'expected multipart/form-data with audio field',
+      correlationId: logger.correlationId,
+    });
+  }
+
+  const audioEntry = formData.get('audio');
+  if (!audioEntry || typeof audioEntry === 'string') {
+    logger.warn('voice.capture.missing_audio_field');
+    return errorResponse('bad_request', {
+      message: 'audio field required (must be a file blob)',
+      correlationId: logger.correlationId,
+    });
+  }
+
+  // FormDataEntryValue is string | File; the string branch is handled above.
+  const audioFile = audioEntry as File;
+  const mimeType = audioFile.type || 'audio/webm';
+  if (!isAcceptedAudioMime(mimeType)) {
+    logger.warn('voice.capture.unsupported_mime', { mime_type: mimeType });
+    return errorResponse('bad_request', {
+      message: `unsupported audio type: ${mimeType}`,
+      correlationId: logger.correlationId,
+      status: 415,
+    });
+  }
+
+  if (audioFile.size === 0) {
+    logger.warn('voice.capture.empty_audio');
+    return errorResponse('bad_request', {
+      message: 'audio file must not be empty',
+      correlationId: logger.correlationId,
+    });
+  }
+
+  if (audioFile.size > DEFAULT_MAX_VOICE_BYTES) {
+    logger.warn('voice.capture.size_exceeded', {
+      size: audioFile.size,
+      max: DEFAULT_MAX_VOICE_BYTES,
+    });
+    return errorResponse('bad_request', {
+      message: `audio exceeds ${DEFAULT_MAX_VOICE_BYTES} byte limit`,
+      correlationId: logger.correlationId,
+      status: 413,
+    });
+  }
+
+  const sourceId = crypto.randomUUID();
+  logger.info('voice.capture.received', {
+    source_id: sourceId,
+    mime_type: mimeType,
+    size: audioFile.size,
+  });
+
+  const audio = await audioFile.arrayBuffer();
+  const provider = getTranscriptionProvider(env);
+
+  let transcriptText: string | null = null;
+  if (provider.ready) {
+    const result = await provider.transcribe({
+      audio,
+      mime_type: mimeType,
+      source_id: sourceId,
+    });
+
+    if (result.ok) {
+      transcriptText = result.text;
+      logger.info('voice.capture.transcribed', {
+        source_id: sourceId,
+        provider: result.provider,
+        text_length: result.text.length,
+      });
+    } else {
+      logger.warn('voice.capture.transcription_failed', {
+        source_id: sourceId,
+        provider: result.provider,
+        reason: result.reason,
+      });
+    }
+  } else {
+    logger.info('voice.capture.transcription_stub', {
+      source_id: sourceId,
+      provider: provider.name,
+    });
+  }
+
+  recordUiInbound({
+    text: transcriptText ?? `[voice: ${mimeType}, ${audioFile.size} bytes]`,
+  });
+  const sessionId = getLatest().session.session_id;
+
+  logger.info('voice.capture.ok', { source_id: sourceId, session_id: sessionId });
+
+  return jsonResponse(
+    { ok: true, session_id: sessionId },
+    { correlationId: logger.correlationId, headers: { 'cache-control': 'no-store' } },
+  );
 }
