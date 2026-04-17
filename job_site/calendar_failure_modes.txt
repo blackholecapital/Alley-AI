@@ -1,0 +1,303 @@
+CALENDAR FAILURE MODES — EXEC-AI-STAGE3-004 | S4 | WORKER B
+=============================================================
+Generated: 2026-04-17
+Branch:    claude/add-calendar-tests-SEgMz
+Scope:     Failure-mode catalogue for the single Stage 3 calendar
+           action boundary (CALENDAR_LIST_TODAY). Pinned modes:
+             - provider_not_configured
+             - provider_not_ready
+             - provider_unsupported
+             - upstream_error
+             - invalid_window
+             - unknown_action (router level)
+Companion: /worker-wb/test/calendar-single-action.test.ts
+           /job_site/calendar_demo_checklist.txt
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/worker-execution-manual-v1.1.txt
+- /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+- /worker-wb/src/integrations/calendar/index.ts
+- /worker-wb/src/integrations/calendar/provider.ts
+- /worker-wb/src/routes/calendar-status.ts
+- /worker-wb/src/lib/action-router.ts
+
+NOTE: /job_site/factory-manual-v1.1.txt is present on disk as
+      /job_site/factory-manual-v1.11.txt. Same active manual per
+      PRECEDENCE LAW; flag only.
+
+----------------------------------------------------------
+1. SAFETY INVARIANTS (every failure mode obeys all four)
+----------------------------------------------------------
+I-1  The /calendar/status route MUST return HTTP 200 regardless of
+     provider state. A non-200 here breaks operator monitoring and any
+     UI polling loop.
+
+I-2  The action handler MUST NOT throw. Provider errors, missing config,
+     and invalid env values are captured and returned as ActionResult
+     (ok=false). Uncaught throws crash the Worker isolate.
+
+I-3  Every failure result MUST carry a human-readable reply_text. The
+     operator UI renders this directly to the user. A blank, missing,
+     or stack-trace reply_text is a PATCH condition.
+
+I-4  Every failure result MUST carry an error.code from the closed
+     ActionErrorCode enum so the UI can branch on code, not free text.
+     Valid codes: "unknown_action" | "provider_not_ready" |
+                  "provider_error" | "handler_error"
+
+----------------------------------------------------------
+2. CLOSED FAILURE-REASON ENUM (provider-facing, CalendarFailureReason)
+----------------------------------------------------------
+These are the values that CalendarReadResult.reason may carry when
+ok=false. They originate in the calendar provider boundary:
+
+    provider_not_configured — CALENDAR_PROVIDER is unset, empty,
+                              "none", or "unconfigured". The provider
+                              never attempts a network call.
+
+    provider_not_ready      — Provider is named but has not completed
+                              initialization (future: OAuth token not
+                              yet refreshed, connection pool warming up).
+                              Reserved for runtime transient states.
+
+    provider_unsupported    — CALENDAR_PROVIDER is set to a name that
+                              has no registered adapter in the factory
+                              (e.g. "google", "outlook", "apple").
+                              Stage 3 supports only "demo".
+
+    upstream_error          — Provider adapter completed a network call
+                              but the upstream API returned a non-2xx,
+                              rate-limit, or quota error. Retryable
+                              depends on the HTTP status code.
+
+    invalid_window          — The computed today-window is invalid
+                              (e.g. request.now is NaN or the timezone
+                              arithmetic overflowed). This is a code
+                              or config defect, not a transient state.
+
+----------------------------------------------------------
+3. ACTION ROUTER FAILURE CODE
+----------------------------------------------------------
+At the ActionRouter level, one additional error code is possible
+before the provider boundary is ever reached:
+
+    unknown_action          — The dispatched action_type has no
+                              registered handler. This fires if code
+                              outside the calendar boundary dispatches
+                              a second (unregistered) action type.
+                              Stage 3 scope: only CALENDAR_LIST_TODAY
+                              is registered, so any other action_type
+                              returns unknown_action.
+
+----------------------------------------------------------
+4. CANNED OPERATOR-FACING REPLY_TEXT BY REASON
+----------------------------------------------------------
+Each failure reason maps to one specific canned message. These are
+the strings the handler emits via FAILURE_REPLY_BY_REASON in index.ts.
+The operator UI renders these to the user without modification.
+
+  provider_not_configured:
+    "I don't have a calendar connected yet. Ask the operator to set
+     CALENDAR_PROVIDER and I'll pick it up."
+
+  provider_not_ready:
+    "The calendar connection is set up but not ready right now. Try
+     again in a moment."
+
+  provider_unsupported:
+    "That calendar provider isn't supported yet. Ask the operator to
+     pick a supported CALENDAR_PROVIDER."
+
+  upstream_error:
+    "The calendar service returned an error. I've logged it for the
+     operator."
+
+  invalid_window:
+    "I couldn't read a valid time window for today. I've logged it for
+     the operator."
+
+  fallback (unrecognized reason):
+    "I couldn't read today's schedule (<reason>)."
+
+----------------------------------------------------------
+5. FAILURE-MODE MATRIX
+----------------------------------------------------------
+
+Mode: provider_not_configured
+  trigger:       CALENDAR_PROVIDER unset, empty, "none", or
+                 "unconfigured"
+  gate location: calendar/provider.ts → UnconfiguredCalendarProvider
+                 (returned by getCalendarProvider factory);
+                 handler checks provider.ready before calling
+                 readTodaysSchedule
+  ActionResult:  ok=false, error.code="provider_not_ready"
+                 reply_text = canned "no calendar connected" message
+  throws?:       NO
+  HTTP status:   200
+  operator UI:   failure badge; canned reply_text shown to user;
+                 CALENDAR_PROVIDER env var named explicitly
+  test:          "failure: dispatch CALENDAR_LIST_TODAY with
+                  unconfigured provider returns ok=false"
+                 "failure: unconfigured provider reply_text is the
+                  canned human-readable message"
+                 "failure: unconfigured provider result has
+                  error.code = 'provider_not_ready'"
+                 "failure: dispatch does NOT throw when provider is
+                  unconfigured"
+
+Mode: provider_unsupported
+  trigger:       CALENDAR_PROVIDER set to an unrecognized value (e.g.
+                 "google", "outlook", "apple")
+  gate location: calendar/provider.ts → getCalendarProvider factory
+                 returns an anonymous not-ready object with
+                 reason="provider_unsupported"
+  ActionResult:  ok=false, error.code="provider_not_ready"
+                 reply_text = canned "not supported yet" message
+  throws?:       NO
+  HTTP status:   200
+  operator UI:   failure badge; user informed provider is unsupported
+  test:          "failure: unsupported provider name returns ok=false
+                  with provider_unsupported reason"
+
+Mode: invalid_window
+  trigger:       DemoCalendarProvider.readTodaysSchedule called with
+                 request.now that is not a valid Date (NaN)
+  gate location: calendar/provider.ts DemoCalendarProvider.readTodaysSchedule
+  CalendarReadResult: ok=false, reason="invalid_window"
+  ActionResult:  ok=false, error.code="provider_error"
+                 reply_text = canned "invalid time window" message
+  throws?:       NO
+  HTTP status:   200
+  operator UI:   failure badge; operator prompted to check clock/TZ config
+
+Mode: upstream_error
+  trigger:       Future live provider adapter returns non-2xx / parse
+                 failure from the calendar API
+  gate location: Future live provider adapter (out of Stage 3 scope;
+                 demo provider never produces this)
+  CalendarReadResult: ok=false, reason="upstream_error", retryable per
+                 HTTP status
+  ActionResult:  ok=false, error.code="provider_error"
+                 reply_text = canned "calendar service returned error"
+  throws?:       NO — adapter must catch and return ok=false
+  HTTP status:   200
+  operator UI:   failure badge; error logged for operator inspection
+
+Mode: unknown_action
+  trigger:       Caller dispatches an action_type that is not
+                 registered in the ActionRouter (e.g. "calendar.create")
+  gate location: action-router.ts ActionRouter.dispatch
+  ActionResult:  ok=false, error.code="unknown_action"
+                 reply_text names the unrecognized action_type
+  throws?:       NO
+  HTTP status:   200
+  operator UI:   not typically user-visible; surfaces in runtime logs
+                 and developer tooling
+  test:          "failure: unknown action type returns ok=false with
+                  error.code=unknown_action"
+
+----------------------------------------------------------
+6. FAILURE-ORDER GATES (decision flow inside the handler)
+----------------------------------------------------------
+The handler in buildCalendarListTodayHandler evaluates in this order:
+
+  1. provider.ready check — fires BEFORE readTodaysSchedule call.
+     Returns ok=false (provider_not_configured / provider_not_ready /
+     provider_unsupported) without any I/O.
+
+  2. provider.readTodaysSchedule — only reached when provider.ready=true.
+     Can return ok=false with reason invalid_window or upstream_error.
+
+  3. SUCCESS — readTodaysSchedule returned ok=true with event array.
+     formatScheduleReply produces the reply_text; handler returns ok=true.
+
+Gate 1 always runs first so no network I/O is wasted on a misconfigured
+or missing provider. This matches the voice path gate order principle.
+
+----------------------------------------------------------
+7. SAFE-FAILURE PROPERTIES (summary for operator)
+----------------------------------------------------------
+  a. The Worker isolate NEVER crashes (no unhandled throw) due to
+     calendar action failure. The action router wraps all handler
+     calls in try/catch; even a buggy provider adapter is caught and
+     returns error.code="handler_error".
+
+  b. /calendar/status ALWAYS returns HTTP 200 whether the provider is
+     configured, unconfigured, or unsupported.
+
+  c. Every failure emits a human-readable reply_text. Users are NOT
+     shown raw error messages or stack traces.
+
+  d. Every failure emits an error.code from the closed enum so the UI
+     can render the appropriate badge without parsing free text.
+
+  e. The single-action scope lock (C1) ensures no accidental write
+     actions (create/update/delete) can be dispatched even if a
+     client sends an unexpected action_type — the router returns
+     unknown_action.
+
+----------------------------------------------------------
+8. TESTS / FIXTURE COVERAGE
+----------------------------------------------------------
+File: /worker-wb/test/calendar-single-action.test.ts
+Run:  cd worker-wb && node --experimental-strip-types \
+        test/calendar-single-action.test.ts
+
+Test cases that cover this catalogue:
+  * CALENDAR_LIST_TODAY constant is "calendar.list_today"
+  * registerCalendarActions registers exactly one action
+  * router does NOT have create/update/delete actions
+  * DemoCalendarProvider.ready is true
+  * happy path dispatch returns ok=true
+  * payload carries provider, window, events, event_count
+  * 3 seed events anchored to today, all confirmed
+  * reply_text shows bullets, plural header, locations
+  * distinct dates produce distinct event timestamps
+  * UnconfiguredCalendarProvider.ready is false
+  * dispatch with unconfigured provider returns ok=false
+  * unconfigured reply_text is the canned human-readable message
+  * error.code = "provider_not_ready" when unconfigured
+  * dispatch does NOT throw when unconfigured
+  * unknown action type returns ok=false, error.code=unknown_action
+  * unsupported provider returns ok=false, reply references "supported"
+  * dispatch never throws (demo, none/empty, unconfigured)
+  * handled_at always present as ISO string
+  * formatScheduleReply: empty → "clear" message
+  * formatScheduleReply: single event → singular header
+  * formatScheduleReply: ok=false → canned messages (all 5 reasons)
+  * formatScheduleReply: location appended when present
+  * parseTimezoneOffset: missing/empty → 0
+  * parseTimezoneOffset: valid integer parsed
+  * parseTimezoneOffset: out-of-range → 0
+  * parseTimezoneOffset: non-numeric → 0
+  * GET /calendar/status no ?run → 200, invocation=null
+  * GET /calendar/status ?run=1 demo → 200, invocation.ok=true
+  * GET /calendar/status ?run=1 unconfigured → 200, ok=false, no throw
+  * POST /calendar/status → 405
+  * HEAD /calendar/status → 200, no body
+
+----------------------------------------------------------
+9. ACCEPTANCE GATES (for S4 checkpoint)
+----------------------------------------------------------
+PASS conditions:
+  [ ] /calendar/status returns HTTP 200 on EVERY provider state.
+  [ ] Action handler does NOT throw on any failure mode in §5.
+  [ ] reply_text is non-empty and human-readable on every failure path.
+  [ ] error.code is from the closed ActionErrorCode enum.
+  [ ] Exactly one action registered: CALENDAR_LIST_TODAY.
+  [ ] DemoCalendarProvider happy path: ok=true, 3 events, event list in
+      reply_text.
+  [ ] Unconfigured / unsupported failure path: ok=false, canned message,
+      CALENDAR_PROVIDER named, no throw.
+  [ ] Test file passes locally (all cases).
+  [ ] Repo mirrored, committed, pushed to designated branch.
+
+PATCH conditions (any one fails):
+  [ ] /calendar/status throws or returns non-200 on any path.
+  [ ] reply_text is empty, missing, or contains a raw stack trace.
+  [ ] error.code is missing or outside the enum.
+  [ ] More than one calendar action type registered.
+  [ ] Scope expanded beyond CALENDAR_LIST_TODAY.
+  [ ] An uncaught exception escapes the action handler.
