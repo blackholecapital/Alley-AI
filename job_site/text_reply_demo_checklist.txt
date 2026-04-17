@@ -1,0 +1,221 @@
+TEXT REPLY-BY-DEFAULT DEMO CHECKLIST — EXEC-AI-STAGE3-004 | S2 | WORKER B
+==========================================================================
+Generated: 2026-04-17
+Branch:    claude/verify-api-endpoints-dxGjT
+Companion artifact: /worker-wb/test/telegram-text-reply-default.test.ts
+Scope:     Operator-facing demo + verification steps proving two-way
+           Telegram text behavior across two consecutive messages,
+           with each message producing an assistant reply by default
+           (no receipt-only acknowledgements).
+
+--------------------------------------------------------------------------
+0. REFERENCES CONSULTED
+--------------------------------------------------------------------------
+- /job_site/factory-manual-v1.1.txt   (present on disk as
+                                       /job_site/factory-manual-v1.11.txt
+                                       — treated as the same active
+                                       manual per its PRECEDENCE LAW)
+- /job_site/worker-execution-manual-v1.1.txt
+- /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+
+--------------------------------------------------------------------------
+1. STAGE 3 S2 CONTRACT UNDER TEST
+--------------------------------------------------------------------------
+Build sheet S2 goal:
+  "Ensure text messages generate real assistant replies by default and
+   are reflected in the UI."
+
+Worker A S2 contract paths:
+  /worker-wb/src/integrations/telegram/inbound.ts
+  /worker-wb/src/integrations/telegram/outbound.ts
+  /worker-wb/src/routes/telegram-webhook.ts
+  /worker-wb/src/lib/session-store.ts
+
+S2 reply-by-default contract pinned by this checklist + companion test:
+  R1. Every text-bearing inbound update produces an outbound reply
+      recorded in the session store. Receipt-only ack = PATCH.
+  R2. Two consecutive inbound messages each produce their own outbound
+      reply, in order. Session store interleaving:
+        in:1  ->  out:1  ->  in:2  ->  out:2
+  R3. Every outbound row:
+        - targets the same chat_id as the inbound it replies to
+        - carries a non-empty `text` string (no silent ack)
+        - varies with the inbound text (reply derives from the message,
+          not a static no-op string)
+  R4. session_id from /session/latest is stable across both turns so
+      the operator UI renders one continuous trail.
+
+--------------------------------------------------------------------------
+2. AUTOMATED TEST COVERAGE MATRIX
+--------------------------------------------------------------------------
+File: /worker-wb/test/telegram-text-reply-default.test.ts
+
+Area A — Fixture coherence
+  test ids:
+    "two consecutive update fixtures share chat_id and differ in text"
+    "webhook request shape declares secret-token header and POST method"
+  proves: fixtures honor Telegram Bot API and the build-sheet route.
+
+Area B — Reply by default (single message)
+  test id:
+    "first inbound update produces an outbound reply (reply-by-default)"
+  proves R1: every inbound text yields one outbound row.
+
+Area C — Two consecutive messages
+  test ids:
+    "two consecutive updates produce two outbound replies"
+    "session store interleaves in:1, out:1, in:2, out:2 in chronological order"
+    "inbound + outbound ids encode the originating telegram update_id"
+  proves R2: in/out ordering and id stability across two turns.
+
+Area D — No silent ack, no static reply
+  test ids:
+    "every outbound reply carries non-empty text — no silent ack"
+    "outbound replies vary with inbound text — reply derives from the message"
+  proves R3: reply content is non-empty and per-message.
+
+Area E — Round-trip closure
+  test ids:
+    "outbound chat_id equals inbound chat.id for both turns (round-trip closure)"
+    "session_id is stable across two consecutive turns"
+  proves R3 chat-identity invariant and R4 session continuity.
+
+--------------------------------------------------------------------------
+3. RUNNING THE TESTS
+--------------------------------------------------------------------------
+Self-contained assertion harness — no new devDependency added.
+
+  Option A — direct (Node 22+ with TS strip types):
+      cd worker-wb && \
+        node --experimental-strip-types \
+          test/telegram-text-reply-default.test.ts
+
+  Option B — any TS-aware runner (once a framework is added):
+      npx vitest run worker-wb/test/telegram-text-reply-default.test.ts
+
+Last local run on this branch:
+  10 passed, 0 failed (10 total)
+
+The simulator function `simulateRoundTrip` in the test file mirrors
+the reply-by-default contract Worker A's webhook + session-store must
+satisfy. Once a real test runner with bundler-style module resolution
+is wired up, swap `simulateRoundTrip` for live imports of
+  /worker-wb/src/routes/telegram-webhook.ts
+  /worker-wb/src/lib/session-store.ts
+The fixtures and assertions remain canonical.
+
+--------------------------------------------------------------------------
+4. LIVE-PATH OPERATOR DEMO STEPS (post-deploy)
+--------------------------------------------------------------------------
+Prereqs:
+  * Worker deployed from /worker-wb to *.workers.dev (per Stage 3
+    /job_site/cloudflare_access_matrix.txt).
+  * TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET set via
+    `wrangler secret put` in the /worker-wb context.
+  * Webhook registered against the workers.dev URL OR the custom-domain
+    URL with /telegram/webhook in the Access Bypass policy.
+  * Operator UI shell open at the Worker root ("/").
+
+Step 1 — pre-flight: confirm /session/latest is empty or stable
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | jq '.counts'
+  Expect: {"inbound":N,"outbound":N,"total":2N} for some N >= 0.
+  Record the starting `session_id` from the response.
+
+Step 2 — send the FIRST text message from Telegram
+  Action: in the Telegram client, send "first message: how are you" to
+          the bot.
+  Expect (inside ~2 s):
+    - bot reply visible in Telegram client (NOT just a typing indicator,
+      NOT silent — actual message text from the bot)
+    - operator UI shows one new inbound row AND one new outbound row
+      for this turn within one poll interval
+
+Step 3 — verify session store after first turn
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | jq '.counts'
+  Expect: counts.inbound == N+1, counts.outbound == N+1, counts.total == 2N+2
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | \
+    jq '.items[0:2] | map({direction, chat_id, text})'
+  Expect: items[0] direction=outbound (newest), items[1] direction=inbound,
+          both with chat_id == your private chat id, outbound text non-empty.
+
+Step 4 — send the SECOND text message from Telegram
+  Action: in the Telegram client, send "second message: what is on my
+          calendar" to the bot.
+  Expect (inside ~2 s):
+    - second bot reply visible in Telegram client
+    - the bot reply must be DIFFERENT in content from the first reply
+      (proves reply derives from the message, not a static ack)
+    - operator UI shows another in/out pair appended to the trail
+
+Step 5 — verify two-turn interleaving in session store
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | jq '.counts'
+  Expect: counts.inbound == N+2, counts.outbound == N+2, counts.total == 2N+4
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | \
+    jq '.items[0:4] | map({direction, text})'
+  Expect (newest-first): outbound, inbound, outbound, inbound.
+  When reversed, the chronological order is in:1, out:1, in:2, out:2.
+
+Step 6 — verify session_id stability
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" | jq '.session.session_id'
+  Expect: identical to the session_id captured in Step 1.
+
+Step 7 — UI cross-check
+  In the operator UI, confirm:
+    - both inbound texts appear with the chat user identity
+    - both outbound replies appear with the bot identity
+    - the order matches Step 5
+    - last-event timestamp updates after each turn
+
+--------------------------------------------------------------------------
+5. ACCEPTANCE GATES (for S2 checkpoint)
+--------------------------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] /worker-wb/test/telegram-text-reply-default.test.ts exists and the
+      10 cases above all pass locally.
+  [ ] /job_site/text_reply_demo_checklist.txt exists (this file).
+  [ ] Live demo Steps 2-5 succeed for two consecutive Telegram messages.
+  [ ] Outbound replies are non-empty AND vary across the two turns.
+  [ ] Session store shows the in:1, out:1, in:2, out:2 interleaving.
+  [ ] session_id is stable across both turns.
+  [ ] Repo mirrored, committed, and pushed to the designated branch.
+
+PATCH conditions (any one fails):
+  [ ] Worker returns 200 but no outbound row is recorded
+      (receipt-only ack — PATCH per build sheet).
+  [ ] Outbound text is empty, missing, or identical for both turns.
+  [ ] Session store shows fewer than 2 outbound rows after 2 inbounds.
+  [ ] UI never reflects the second turn within one poll interval.
+  [ ] session_id changes mid-conversation.
+
+--------------------------------------------------------------------------
+6. ISSUES / FLAGS (for Foreman A and Foreman B awareness)
+--------------------------------------------------------------------------
+- Build sheet cites /job_site/factory-manual-v1.1.txt; file on disk is
+  /job_site/factory-manual-v1.11.txt (v1.11 lean). Treated as the same
+  active manual per PRECEDENCE LAW. Flag only.
+- Current /worker-wb/src/routes/telegram-webhook.ts builds the reply
+  with `received: <preview>` (see telegram-webhook.ts:36-39). That
+  string IS non-empty AND varies with input text, so the simulator and
+  the live path agree on R3 today. Worker A may upgrade the reply
+  builder to a real assistant response without invalidating any test in
+  the companion file — the contract is reply-by-default + per-message
+  variance, not a specific reply string.
+- The companion test currently uses a pure `simulateRoundTrip` function
+  in place of live imports because the repository has no installed test
+  runner with bundler-style resolution (`@cloudflare/vitest-pool-workers`,
+  vitest, or tsx). When such a runner is added, swap the simulator for
+  live imports of the route + session-store. Fixtures stay unchanged.
+- Stage 2 companion artifact /job_site/telegram_text_roundtrip_checklist.txt
+  remains valid for the original S2 round-trip contract; this Stage 3
+  file narrows the focus to the reply-by-default invariant across two
+  consecutive messages and does not supersede it.
+
+--------------------------------------------------------------------------
+7. ARTIFACT SELF-CHECK
+--------------------------------------------------------------------------
+expected_artifact_1: /worker-wb/test/telegram-text-reply-default.test.ts  — present
+expected_artifact_2: /job_site/text_reply_demo_checklist.txt              — present (this file)
+local_test_run:      10 passed, 0 failed (10 total)
+repo_mirror_required: yes — written to /home/user/ALI-ai working tree
+commit_required:      yes — to be committed on claude/verify-api-endpoints-dxGjT
+push_required:        yes — to be pushed to origin
