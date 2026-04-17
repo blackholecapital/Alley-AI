@@ -18,7 +18,7 @@ export interface SessionItem {
   id: string;
   direction: 'inbound' | 'outbound';
   source: SessionItemSource;
-  kind: 'text' | 'voice' | 'other';
+  kind: 'text' | 'voice' | 'other' | 'failure';
   chat_id: number;
   message_id: number | null;
   user_id: number | null;
@@ -114,6 +114,36 @@ export function recordOutbound(record: OutboundRecord): SessionItem {
     user_id: null,
     username: null,
     text: record.text,
+    at: record.at ?? new Date().toISOString(),
+  };
+  push(item);
+  return item;
+}
+
+// Failure state recording. Persists readable failure events so /session/latest
+// surfaces them in the event trail alongside normal inbound/outbound items.
+// A failure item is direction='outbound' kind='failure' so the UI can render
+// it as a terminal step in the exchange without special casing.
+
+export interface FailureRecord {
+  event_id: string;
+  chat_id: number;
+  failure_code: string;
+  failure_message: string;
+  at?: string;
+}
+
+export function recordFailure(record: FailureRecord): SessionItem {
+  const item: SessionItem = {
+    id: `fail:${record.event_id}`,
+    direction: 'outbound',
+    source: 'telegram',
+    kind: 'failure',
+    chat_id: record.chat_id,
+    message_id: null,
+    user_id: null,
+    username: null,
+    text: `[${record.failure_code}] ${record.failure_message}`,
     at: record.at ?? new Date().toISOString(),
   };
   push(item);

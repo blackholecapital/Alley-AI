@@ -17,8 +17,8 @@
 // clean 200 so it never treats a handled update as a retriable failure.
 // Structured logs on every boundary preserve observability.
 //
-// Ref: build-sheet-EXEC-AI-STAGE3-004 S3 (voice golden path),
-//      build-sheet-EXEC-AI-STAGE3-004 S2 (reply-path polish for text),
+// Ref: build-sheet-EXEC-AI-STAGE4-001 S2 (live text completion + failure states),
+//      build-sheet-EXEC-AI-STAGE3-004 S3 (voice golden path),
 //      build-sheet-EXEC-AI-STAGE2-003 S2 + S3 + S4 + S5 (baseline).
 
 import { parseTelegramUpdate } from '../integrations/telegram/inbound';
@@ -29,7 +29,7 @@ import type {
   TelegramEnv,
   TelegramUpdate,
 } from '../integrations/telegram/types';
-import { recordInbound, recordOutbound } from '../lib/session-store';
+import { recordInbound, recordOutbound, recordFailure } from '../lib/session-store';
 import type { TranscriptionEnv } from '../providers/transcription/provider';
 import { validateTelegramEnv } from '../lib/env';
 import type { Logger } from '../lib/logging';
@@ -91,6 +91,12 @@ async function handleTextEvent(
       chat_id: event.chat_id,
       status: send.status,
       reason: send.description,
+    });
+    recordFailure({
+      event_id: event.id,
+      chat_id: event.chat_id,
+      failure_code: 'send_failed',
+      failure_message: send.description,
     });
     return;
   }
@@ -161,7 +167,20 @@ async function processTelegramUpdate(
   });
 
   if (event.kind === 'text' && event.text) {
-    const replyText = generateAssistantReply(event.text);
+    let replyText: string;
+    try {
+      replyText = generateAssistantReply(event.text);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error('assistant.reply.error', { event_id: event.id, error: msg });
+      recordFailure({
+        event_id: event.id,
+        chat_id: event.chat_id,
+        failure_code: 'reply_generation_error',
+        failure_message: msg,
+      });
+      return;
+    }
     logger.info('assistant.reply.generated', {
       event_id: event.id,
       kind: event.kind,

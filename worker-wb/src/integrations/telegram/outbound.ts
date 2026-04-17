@@ -1,28 +1,75 @@
-// Telegram outbound sender — in-worker stub.
-// The Worker must close the Telegram/UI loop without depending on an external
-// backend (no PROXY_BACKEND_URL reach-out, no api.telegram.org fetch). The
-// outbound reply is generated in-worker: we synthesize a stable message_id
-// from the wall clock and return a typed success result so the existing
-// pipeline (recordOutbound -> session-store -> /session/latest) completes
-// end-to-end. Signature is preserved so call sites remain unchanged.
-// Ref: build-sheet-EXEC-AI-STAGE2-003 S5 (unreachable-backend fix).
+// Telegram outbound sender — real Telegram Bot API implementation.
+// POSTs to api.telegram.org/bot{token}/sendMessage and returns a typed
+// TelegramSendResult so call sites can distinguish success, network errors,
+// HTTP errors, and Telegram API refusals without throwing.
+// Ref: build-sheet-EXEC-AI-STAGE4-001 S2.
 
 import type { TelegramSendResult } from './types';
+
+const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
 interface SendMessageOptions {
   replyToMessageId?: number;
   disableNotification?: boolean;
 }
 
+interface TelegramApiResponse {
+  ok: boolean;
+  result?: { message_id: number };
+  description?: string;
+}
+
 export async function sendTelegramMessage(
-  _botToken: string,
-  _chatId: number,
-  _text: string,
-  _opts: SendMessageOptions = {},
+  botToken: string,
+  chatId: number,
+  text: string,
+  opts: SendMessageOptions = {},
 ): Promise<TelegramSendResult> {
-  // Synthesize a monotonically-increasing message_id without external I/O.
-  // Workers disallow non-deterministic ops at module scope, so Date.now() is
-  // invoked inside the function — same pattern as session-store identity.
-  const messageId = Math.floor(Date.now() / 1000);
-  return { ok: true, message_id: messageId };
+  if (!botToken) {
+    return { ok: false, status: 0, description: 'TELEGRAM_BOT_TOKEN not configured' };
+  }
+
+  const body: Record<string, unknown> = { chat_id: chatId, text };
+  if (opts.replyToMessageId !== undefined) {
+    body['reply_to_message_id'] = opts.replyToMessageId;
+  }
+  if (opts.disableNotification) {
+    body['disable_notification'] = true;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${TELEGRAM_API_BASE}/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      description: err instanceof Error ? err.message : 'network error reaching Telegram API',
+    };
+  }
+
+  let payload: TelegramApiResponse;
+  try {
+    payload = (await response.json()) as TelegramApiResponse;
+  } catch {
+    return {
+      ok: false,
+      status: response.status,
+      description: `non-JSON response from Telegram (HTTP ${response.status})`,
+    };
+  }
+
+  if (!payload.ok || !payload.result) {
+    return {
+      ok: false,
+      status: response.status,
+      description: payload.description ?? `Telegram returned ok=false (HTTP ${response.status})`,
+    };
+  }
+
+  return { ok: true, message_id: payload.result.message_id };
 }
