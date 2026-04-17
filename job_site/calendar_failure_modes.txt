@@ -242,7 +242,8 @@ or missing provider. This matches the voice path gate order principle.
 8. TESTS / FIXTURE COVERAGE
 ----------------------------------------------------------
 File: /worker-wb/test/calendar-single-action.test.ts
-Run:  cd worker-wb && node --experimental-strip-types \
+Run:  cd worker-wb && node --loader ./test/ts-resolve.mjs \
+        --experimental-strip-types \
         test/calendar-single-action.test.ts
 
 Test cases that cover this catalogue:

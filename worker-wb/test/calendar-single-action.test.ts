@@ -88,7 +88,7 @@ import {
   buildCalendarListTodayHandler,
   formatScheduleReply,
   registerCalendarActions,
-} from '../src/integrations/calendar/index';
+} from '../src/integrations/calendar/index.ts';
 
 import {
   UnconfiguredCalendarProvider,
@@ -96,14 +96,14 @@ import {
   getCalendarProvider,
   parseTimezoneOffset,
   type CalendarReadResult,
-} from '../src/integrations/calendar/provider';
+} from '../src/integrations/calendar/provider.ts';
 
-import { ActionRouter } from '../src/lib/action-router';
+import { ActionRouter } from '../src/lib/action-router.ts';
 
 import {
   handleCalendarStatus,
   __resetCalendarStatusForTests,
-} from '../src/routes/calendar-status';
+} from '../src/routes/calendar-status.ts';
 
 // ────────────────────────────────────────────────────────────────────
 // 2. STUB LOGGER — satisfies Logger interface, captures calls
