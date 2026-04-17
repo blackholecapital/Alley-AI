@@ -1,0 +1,689 @@
+form_id: BUILD-SHEET-STANDARD-SHORT-v3
+form_name: Stage 4 Build Sheet — EXEC-AI-STAGE4-001
+
+1. JOB
+   1.1 job_id: EXEC-AI-STAGE4-001
+   1.2 job_name: Executive AI Assistant Stage 4 — Reply Completion + Voice Capture UX + Calendar Controls + UI Completion
+   1.3 objective: Convert the Stage 3 wired demo into a reliably operable assistant by finishing reply completion, exposing browser voice capture, adding usable calendar controls, and tightening the operator UI without broad redesign.
+   1.4 requested_outcome: A Cloudflare-deployed demo where text replies complete end-to-end, browser voice capture works with visible mic permission flow, calendar mode is usable from the UI with clear configured/unconfigured states, and the UI cleanly exposes the text, voice, and calendar paths on desktop and mobile.
+   1.5 target_root_path: /worker-wb
+   1.6 target_repo_url: [https://github.com/blackholecapital/ALI-ai](https://github.com/blackholecapital/ALI-ai)
+   1.7 inspection_url: [https://github.com/blackholecapital/ALI-ai/tree/main](https://github.com/blackholecapital/ALI-ai/tree/main)
+
+2. RUN CONTROL
+   2.1 mode: single
+   2.2 execution_foreman: Foreman A
+   2.3 checksum_foreman: Foreman B
+   2.4 final_validator: Factory Control Interface
+
+3. TAG FORMAT
+   3.1 foreman_header
+   3.1.1 job_id:
+   3.1.2 foreman:
+   3.1.3 current_stage:
+   3.1.4 current_pass:
+   3.1.5 next_stage:
+   3.1.6 next_owner:
+   3.1.7 passes_remaining:
+   3.1.8 status:
+   3.1.9 current_action:
+
+3.2 worker_tag_format
+3.2.1 [PROJECT | WORKER | STAGE | RESULT]
+
+4. PATHS
+   4.1 stage_activity_log: /job_site/stage_activity_log.txt
+   4.2 final_checksum_path: /job_site/final_checksum.txt
+   4.3 final_tps_report: /job_site/TPS_REPORT.txt
+
+5. REFERENCES
+   5.1 required_references:
+   5.1.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+   5.1.2 /job_site/factory-manual-v1.1.txt
+   5.1.3 /job_site/foreman-manual-v1.1.txt
+   5.1.4 /job_site/worker-execution-manual-v1.1.txt
+   5.2 external_references:
+   5.2.1 [https://github.com/blackholecapital/ALI-ai](https://github.com/blackholecapital/ALI-ai)
+   5.2.2 [https://github.com/linuz90/claude-telegram-bot](https://github.com/linuz90/claude-telegram-bot)
+   5.2.3 [https://github.com/permaevidence/ConciergeforTelegram](https://github.com/permaevidence/ConciergeforTelegram)
+   5.2.4 [https://github.com/iOfficeAI/AionUi](https://github.com/iOfficeAI/AionUi)
+
+6. STAGE
+   6.1 stage_id: S1
+   6.2 stage_name: Scope Lock + UI Direction Lock
+   6.3 stage_owner: Factory Control Interface
+   6.4 stage_goal: Freeze Stage 4 to reply completion, browser mic capture, calendar controls, and clean UI completion only.
+   6.5 stage_inputs:
+   6.5.1 Stage 3 repo state
+   6.5.2 Stage 3 live screenshots and operator findings
+   6.5.3 selected UI direction from chatbot-ui patterns and AionUi agent-state patterns
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | S1 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Create /job_site/stage4_scope_lock.txt locking scope to: text reply completion, browser voice capture UX, calendar controls, UI usability pass, and Cloudflare deploy verification only.
+6.6.4 expected_artifacts:
+6.6.4.1 /job_site/stage4_scope_lock.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.6.6 repo_mirror_required: no
+6.6.7 commit_required: no
+6.6.8 push_required: no
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | S1 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Create /job_site/reference_repo_matrix.txt mapping each approved reference repo to its intended use in Stage 4.
+6.7.4 expected_artifacts:
+6.7.4.1 /job_site/reference_repo_matrix.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.7.6 repo_mirror_required: no
+6.7.7 commit_required: no
+6.7.8 push_required: no
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/stage4_scope_lock.txt
+6.8.2 /job_site/reference_repo_matrix.txt
+6.9 checkpoint_id: S1-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Scope is explicitly locked to reply completion, browser mic capture UX, calendar controls, UI usability, and deploy verification only.
+   7.2 patch_condition: Scope expands into telephony, broad redesign, multi-action scheduling, or unrelated integrations.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: CF-PREP
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S1
+   7.4.2 return_owner: Factory Control Interface
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: CF-PREP
+   6.2 stage_name: Cloudflare Deployment Prep Refresh
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Reconfirm the Stage 4 deploy root, wrangler path, UI asset path, and public route expectations before code changes.
+   6.5 stage_inputs:
+   6.5.1 /worker-wb/wrangler.jsonc
+   6.5.2 /worker-wb/package.json
+   6.5.3 current operator-shell path
+   6.5.4 Stage 3 Cloudflare assumptions
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | CF-PREP | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Verify exact deploy root, wrangler path, deploy command, public routes, and current asset path assumptions. Record only current-valid values.
+6.6.4 expected_artifacts:
+6.6.4.1 /job_site/cloudflare_prep_report.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.6.5.2 /job_site/factory-manual-v1.1.txt
+6.6.6 repo_mirror_required: no
+6.6.7 commit_required: no
+6.6.8 push_required: no
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | CF-PREP | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Verify Access expectations and public route behavior for /, /health, /telegram/webhook, /session/latest, and /calendar/status.
+6.7.4 expected_artifacts:
+6.7.4.1 /job_site/cloudflare_access_matrix.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.7.5.2 /job_site/factory-manual-v1.1.txt
+6.7.6 repo_mirror_required: no
+6.7.7 commit_required: no
+6.7.8 push_required: no
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/cloudflare_prep_report.txt
+6.8.2 /job_site/cloudflare_access_matrix.txt
+6.9 checkpoint_id: CF-PREP-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Deploy root, wrangler path, public routes, and asset path assumptions are explicit and current.
+   7.2 patch_condition: Root path drift, unresolved asset path, wrong deploy command, or Access mismatch.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S2
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: CF-PREP
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S2
+   6.2 stage_name: Text Reply Completion
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Make live Telegram text reliably produce completed assistant replies and surface completion state in UI.
+   6.5 stage_inputs:
+   6.5.1 current Telegram inbound pipeline
+   6.5.2 current outbound reply pipeline
+   6.5.3 current session/event routes
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | S2 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Fix the live text path so inbound text consistently produces a completed assistant reply, persists the full exchange, and records readable failure states when reply generation cannot complete.
+6.6.4 expected_artifacts:
+6.6.4.1 /worker-wb/src/integrations/telegram/inbound.ts
+6.6.4.2 /worker-wb/src/integrations/telegram/outbound.ts
+6.6.4.3 /worker-wb/src/routes/telegram-webhook.ts
+6.6.4.4 /worker-wb/src/lib/session-store.ts
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.6.5.2 /job_site/reference_repo_matrix.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | S2 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Add tests and demo proof steps covering two consecutive text exchanges, a completed reply, and one clean failure state.
+6.7.4 expected_artifacts:
+6.7.4.1 /worker-wb/test/telegram-text-reply-completion.test.ts
+6.7.4.2 /job_site/text_reply_demo_checklist.txt
+6.7.4.3 /job_site/text_failure_modes.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.7.5.2 /job_site/reference_repo_matrix.txt
+6.7.6 repo_mirror_required: yes
+6.7.7 commit_required: yes
+6.7.8 push_required: yes
+
+6.8 required_stage_artifacts:
+6.8.1 /worker-wb/test/telegram-text-reply-completion.test.ts
+6.8.2 /job_site/text_reply_demo_checklist.txt
+6.8.3 /job_site/text_failure_modes.txt
+6.9 checkpoint_id: S2-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Live text path completes replies by default, records the full exchange, and exposes readable failure states.
+   7.2 patch_condition: Text still stalls after receipt, replies do not complete, or the UI hides the final state.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S3
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S2
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S3
+   6.2 stage_name: Browser Voice Capture UX
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Expose a real browser mic permission flow, recording UX, and voice round trip status without broad UI redesign.
+   6.5 stage_inputs:
+   6.5.1 current Talk/Stop UI state
+   6.5.2 current voice session path
+   6.5.3 current transcription and outbound reply path
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | S3 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Implement browser mic permission handling, recording state, stop/send behavior, and clear unsupported-browser or permission-denied handling.
+6.6.4 expected_artifacts:
+6.6.4.1 /apps/operator-shell/src/*
+6.6.4.2 /job_site/voice_capture_contract.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.6.5.2 /job_site/reference_repo_matrix.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | S3 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Complete the browser voice round trip so captured audio reaches the shared voice pipeline and returns either a stable text reply or a spoken reply if already reliable enough. Add proof steps and failure handling.
+6.6.4 expected_artifacts:
+6.7.4.1 /worker-wb/src/integrations/telegram/voice.ts
+6.7.4.2 /worker-wb/test/browser-voice-roundtrip.test.ts
+6.7.4.3 /job_site/voice_demo_checklist.txt
+6.7.4.4 /job_site/voice_failure_modes.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.7.5.2 /job_site/reference_repo_matrix.txt
+6.7.6 repo_mirror_required: yes
+6.7.7 commit_required: yes
+6.7.8 push_required: yes
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/voice_capture_contract.txt
+6.8.2 /worker-wb/test/browser-voice-roundtrip.test.ts
+6.8.3 /job_site/voice_demo_checklist.txt
+6.8.4 /job_site/voice_failure_modes.txt
+6.9 checkpoint_id: S3-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Browser mic capture is operable, permission flow is visible, and one voice round trip completes or cleanly falls back with readable status.
+   7.2 patch_condition: Talk/Stop toggles without real capture, permission flow is missing, or voice status remains ambiguous.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S4
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S3
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S4
+   6.2 stage_name: Calendar Controls + Config Surface
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Make calendar mode operable from the UI with explicit configured and unconfigured states and exactly one simple action boundary.
+   6.5 stage_inputs:
+   6.5.1 current /calendar/status route
+   6.5.2 current calendar action boundary
+   6.5.3 current operator UI
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | S4 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Add a simple calendar mode or settings surface that exposes provider status, demo-mode guidance, one action trigger path, and readable unconfigured/configured states.
+6.6.4 expected_artifacts:
+6.6.4.1 /apps/operator-shell/src/*
+6.6.4.2 /job_site/calendar_ui_contract.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.6.5.2 /job_site/reference_repo_matrix.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | S4 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Tighten the single calendar action path so the UI can trigger it, show result or failure cleanly, and document exactly one happy path plus one safe failure path.
+6.7.4 expected_artifacts:
+6.7.4.1 /worker-wb/src/integrations/calendar/index.ts
+6.7.4.2 /worker-wb/src/integrations/calendar/provider.ts
+6.7.4.3 /worker-wb/src/routes/calendar-status.ts
+6.7.4.4 /worker-wb/test/calendar-ui-single-action.test.ts
+6.7.4.5 /job_site/calendar_demo_checklist.txt
+6.7.4.6 /job_site/calendar_failure_modes.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.7.5.2 /job_site/reference_repo_matrix.txt
+6.7.6 repo_mirror_required: yes
+6.7.7 commit_required: yes
+6.7.8 push_required: yes
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/calendar_ui_contract.txt
+6.8.2 /worker-wb/test/calendar-ui-single-action.test.ts
+6.8.3 /job_site/calendar_demo_checklist.txt
+6.8.4 /job_site/calendar_failure_modes.txt
+6.9 checkpoint_id: S4-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Calendar mode is usable from the UI, one action boundary works or fails cleanly, and provider readiness is visible.
+   7.2 patch_condition: Calendar remains route-only, the UI cannot trigger it, or configured/unconfigured states are unclear.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S5
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S4
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S5
+   6.2 stage_name: UI Completion Pass
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Make the interface simple, clean, mobile-usable, and explicit about chat, voice, and calendar modes without broad redesign.
+   6.5 stage_inputs:
+   6.5.1 selected UI direction
+   6.5.2 completed text, voice, and calendar paths
+   6.5.3 current operator shell
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | S5 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Apply a clean, minimal UI pass inspired by selected reference patterns: simple chat surface, obvious voice button, obvious calendar entry point, mobile-friendly layout, and clear action/status states.
+6.6.4 expected_artifacts:
+6.6.4.1 /apps/operator-shell/src/*
+6.6.4.2 /job_site/ui_stage4_direction.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.6.5.2 /job_site/reference_repo_matrix.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | S5 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Update the session/status surface so the UI clearly shows received, recording, transcribing, processing, action-called, replied, and failed states with timestamps and compact result visibility.
+6.7.4 expected_artifacts:
+6.7.4.1 /worker-wb/src/routes/session-latest.ts
+6.7.4.2 /job_site/ui_stage4_demo_checklist.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.7.5.2 /job_site/reference_repo_matrix.txt
+6.7.6 repo_mirror_required: yes
+6.7.7 commit_required: yes
+6.7.8 push_required: yes
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/ui_stage4_direction.txt
+6.8.2 /job_site/ui_stage4_demo_checklist.txt
+6.9 checkpoint_id: S5-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: UI is simple, clean, mobile-usable, and clearly exposes chat, voice, calendar, and event-trail states.
+   7.2 patch_condition: Critical actions remain hidden, state visibility is unclear, or layout changes drift beyond a targeted completion pass.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S6
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S5
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S6
+   6.2 stage_name: Demo Proof Pack
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Produce one clean runbook and readiness pack for text, browser voice, calendar, and UI proof.
+   6.5 stage_inputs:
+   6.5.1 completed text path
+   6.5.2 completed voice path
+   6.5.3 completed calendar path
+   6.5.4 completed UI state path
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | S6 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Produce one operator runbook covering text reply completion, one browser voice round trip, one calendar action, mobile check, and required screenshot/runtime proof.
+6.6.4 expected_artifacts:
+6.6.4.1 /job_site/demo_runbook.txt
+6.6.4.2 /job_site/demo_evidence_requirements.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.6.6 repo_mirror_required: no
+6.6.7 commit_required: no
+6.6.8 push_required: no
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | S6 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Produce a readiness matrix for Telegram, transcription, calendar provider, browser voice permissions, and Cloudflare route validation including fallback modes.
+6.7.4 expected_artifacts:
+6.7.4.1 /job_site/demo_env_matrix.txt
+6.7.4.2 /job_site/readiness_matrix.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.7.6 repo_mirror_required: no
+6.7.7 commit_required: no
+6.7.8 push_required: no
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/demo_runbook.txt
+6.8.2 /job_site/demo_evidence_requirements.txt
+6.8.3 /job_site/demo_env_matrix.txt
+6.8.4 /job_site/readiness_matrix.txt
+6.9 checkpoint_id: S6-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Operator can run text, voice, calendar, and UI proof without hidden setup knowledge.
+   7.2 patch_condition: Demo depends on tribal knowledge, missing config assumptions, or undocumented browser constraints.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: CF-TEST
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S6
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: CF-TEST
+   6.2 stage_name: Cloudflare Deploy Test
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Prompt operator to perform a real Stage 4 deploy and live proof check.
+   6.5 stage_inputs:
+   6.5.1 current pushed branch and commit evidence
+   6.5.2 /job_site/cloudflare_prep_report.txt
+   6.5.3 /job_site/demo_runbook.txt
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | CF-TEST | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Prepare the exact operator prompt to deploy now on Cloudflare using the declared root path and deploy command, then record evidence references for live routes and demo paths.
+6.6.4 expected_artifacts:
+6.6.4.1 /job_site/cloudflare_operator_prompt.txt
+6.6.4.2 /job_site/cloudflare_test_evidence_index.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+6.6.6 repo_mirror_required: no
+6.6.7 commit_required: no
+6.6.8 push_required: no
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | CF-TEST | RESULT]
+6.7.2 expected_status:
+6.7.3 task:
+6.7.4 expected_artifacts:
+6.7.5 required_references:
+6.7.6 repo_mirror_required:
+6.7.7 commit_required:
+6.7.8 push_required:
+
+6.8 required_stage_artifacts:
+6.8.1 deployed_route
+6.8.2 healthcheck_response_or_equivalent
+6.8.3 screenshot_of_live_route
+6.8.4 /job_site/cloudflare_operator_prompt.txt
+6.8.5 /job_site/cloudflare_test_evidence_index.txt
+6.9 checkpoint_id: CF-TEST-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Operator has been explicitly prompted to deploy now using the declared root path and deploy command, and evidence exists for /, /health, /telegram/webhook, /session/latest, /calendar/status, and the UI.
+   7.2 patch_condition: Deploy failed, wrong root directory, route inaccessible, Access blocks required public path, or asset path mismatches live behavior.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: CF-VERIFY
+   7.3.2 next_owner: Foreman B
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: CF-TEST
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: CF-VERIFY
+   6.2 stage_name: Cloudflare Checksum Validation
+   6.3 stage_owner: Foreman B
+   6.4 stage_goal: Validate Cloudflare deploy evidence before closeout.
+   6.5 stage_inputs:
+   6.5.1 deployed route evidence
+   6.5.2 screenshot evidence
+   6.5.3 runtime route evidence
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | CF-VERIFY | RESULT]
+6.6.2 expected_status:
+6.6.3 task:
+6.6.4 expected_artifacts:
+6.6.5 required_references:
+6.6.6 repo_mirror_required:
+6.6.7 commit_required:
+6.6.8 push_required:
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | CF-VERIFY | RESULT]
+6.7.2 expected_status:
+6.7.3 task:
+6.7.4 expected_artifacts:
+6.7.5 required_references:
+6.7.6 repo_mirror_required:
+6.7.7 commit_required:
+6.7.8 push_required:
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/cloudflare_checksum_result.txt
+6.9 checkpoint_id: CF-VERIFY-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Deployed route matches declared target, required runtime routes respond, UI route responds, and screenshots match deployed behavior.
+   7.2 patch_condition: Missing evidence, route mismatch, blocked public path, or runtime mismatch.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S7
+   7.3.2 next_owner: Foreman B
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: CF-TEST
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S7
+   6.2 stage_name: Final Checksum
+   6.3 stage_owner: Foreman B
+   6.4 stage_goal: Confirm all required artifacts and closeout inputs are present.
+   6.5 stage_inputs:
+   6.5.1 stage artifacts
+   6.5.2 /job_site/stage_activity_log.txt
+   6.5.3 /job_site/cloudflare_checksum_result.txt
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-001 | WORKER A | S7 | RESULT]
+6.6.2 expected_status:
+6.6.3 task:
+6.6.4 expected_artifacts:
+6.6.5 required_references:
+6.6.6 repo_mirror_required:
+6.6.7 commit_required:
+6.6.8 push_required:
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-001 | WORKER B | S7 | RESULT]
+6.7.2 expected_status:
+6.7.3 task:
+6.7.4 expected_artifacts:
+6.7.5 required_references:
+6.7.6 repo_mirror_required:
+6.7.7 commit_required:
+6.7.8 push_required:
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/final_checksum.txt
+6.9 checkpoint_id: S7-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: All declared stage artifacts, Cloudflare checksum, and closeout inputs are present and aligned with the build sheet.
+   7.2 patch_condition: Missing artifact, path mismatch, or unresolved closeout input.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S8
+   7.3.2 next_owner: Factory Control Interface
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S7
+   7.4.2 return_owner: Foreman B
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. FINAL VALIDATION
+   8.1 required_inputs:
+   8.1.1 /job_site/stage_activity_log.txt
+   8.1.2 /job_site/final_checksum.txt
+   8.1.3 /job_site/cloudflare_checksum_result.txt
+   8.1.4 /job_site/stage4_scope_lock.txt
+   8.1.5 /job_site/reference_repo_matrix.txt
+   8.2 validation_check_1: Text reply completion is live-proven and readable in UI.
+   8.3 validation_check_2: Browser voice capture UX is operable and one round trip or fallback path is live-proven.
+   8.4 validation_check_3: Calendar controls are usable from the UI and one action path is live-proven or cleanly fails with readable status.
+   8.5 outputs:
+   8.5.1 completion_status
+   8.5.2 /job_site/TPS_REPORT.txt
+   8.6 completion_status: COMPLETE on PASS
+
+9. FOREMAN OUTPUT FORM
+   9.1 job_id:
+   9.2 foreman:
+   9.3 current_stage:
+   9.4 current_pass:
+   9.5 next_stage:
+   9.6 next_owner:
+   9.7 passes_remaining:
+   9.8 status:
+   9.9 current_action:
+   9.10 artifacts:
+   9.11 checkpoint_result:
+   9.12 handoff_instruction:
+   9.13 issue:
+
+10. WORKER DISPATCH FORM
+    10.1 [PROJECT | WORKER | STAGE | RESULT]
+    10.2 expected_status:
+    10.3 task:
+    10.4 expected_artifacts:
+    10.5 required_references:
+    10.6 repo_mirror_required:
+    10.7 commit_required:
+    10.8 push_required:
+
+11. WORKER RESULT FORM
+    11.1 [PROJECT | WORKER | STAGE | RESULT]
+    11.2 status:
+    11.3 artifacts:
+    11.4 summary:
+    11.5 issues:
+
+12. TPS REPORT FORM
+    12.1 job_id:
+    12.2 completion_status:
+    12.3 job_summary:
+    12.4 stage_results:
+    12.5 artifact_summary:
+    12.6 patch_history:
+    12.7 closeout_note:
+
+13. REFERENCE MATERIAL
+    13.1 job_site: /job_site
+    13.2 target_file_system: [https://github.com/blackholecapital/ALI-ai/tree/main](https://github.com/blackholecapital/ALI-ai/tree/main)
+    13.3 factory_manual: /job_site/factory-manual-v1.1.txt
+    13.4 foreman_manual: /job_site/foreman-manual-v1.1.txt
+    13.5 worker_execution_manual: /job_site/worker-execution-manual-v1.1.txt
+    13.6 active_build_sheet: /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+    13.7 reference_repo_1:
+    13.7.1 url: [https://github.com/linuz90/claude-telegram-bot](https://github.com/linuz90/claude-telegram-bot)
+    13.7.2 reference_use: Telegram text and voice assistant flow, reply completion patterns, voice-note handling, and session behavior.
+    13.8 reference_repo_2:
+    13.8.1 url: [https://github.com/permaevidence/ConciergeforTelegram](https://github.com/permaevidence/ConciergeforTelegram)
+    13.8.2 reference_use: Telegram assistant plus calendar boundary patterns, operator-facing calendar actions, and voice-to-action flow.
+    13.9 reference_repo_3:
+    13.9.1 url: [https://github.com/iOfficeAI/AionUi](https://github.com/iOfficeAI/AionUi)
+    13.9.2 reference_use: Clean high-end agent UI patterns, visible action/state rendering, and usable operator surfaces for desktop/mobile adaptation.
+
+FORM LAW BLOCK
+L1. stage numbering must use S1, S2, S3 format only
+L2. field numbering must use 1.1, 1.2, 1.3 format only
+L3. foreman status values allowed: PASS | PATCH | ERROR
+L4. worker status values allowed: PASS | PATCH
+L5. unused fields must remain blank
+L6. do not delete fields from the template
+L7. all expected_artifacts must be exact target paths
+L8. worker dispatch tag must exactly match worker result tag format
+L9. required_references only in worker orders
+L10. all file writes must use declared target paths only
