@@ -1,10 +1,33 @@
-// Telegram voice-note intake.
-// Resolves the Telegram file path via getFile and downloads audio bytes via
-// the Bot API file server. Enforces duration and size guards so oversized or
-// out-of-scope payloads fail readably before transcription is attempted.
-// Ref: build-sheet-EXEC-AI-STAGE2-003 S4.
+// Telegram voice-note intake + complete voice flow.
+//
+// Owns the voice-note golden path end to end. grammY-style intake resolves
+// the Telegram file via getFile and downloads the audio bytes from the Bot
+// API file server; a size/duration guard short-circuits oversized or
+// unsupported payloads before any network cost is paid.
+//
+// The full voice flow composes fetch → transcribe → assistant → reply:
+//
+//   1. fetchTelegramVoiceAudio   (Telegram file API)
+//   2. transcription provider    (single-provider abstraction, HTTP)
+//   3. assistant pipeline        (shared generateAssistantReply, injected)
+//   4. outbound reply            (sendTelegramMessage + recordOutbound)
+//
+// Stage 3 scope permits a text fallback if the spoken-audio reply is not
+// stable enough for this stage, so every failure mode closes the loop with
+// a readable text reply rather than a silent drop. The outbound reply is
+// the same stable contract the text path uses, so /session/latest renders
+// both text and voice turns in the same event trail.
+//
+// Ref: build-sheet-EXEC-AI-STAGE3-004 S3 (voice golden path).
+//      build-sheet-EXEC-AI-STAGE2-003 S4 (voice intake baseline).
 
-import type { TelegramVoice } from './types';
+import type { InternalEvent, TelegramEnv, TelegramVoice } from './types';
+import { sendTelegramMessage } from './outbound';
+import { recordInbound, recordOutbound } from '../../lib/session-store';
+import { getTranscriptionProvider } from '../../providers/transcription';
+import type { TranscriptionEnv } from '../../providers/transcription/provider';
+import { validateTranscriptionEnv } from '../../lib/env';
+import type { Logger } from '../../lib/logging';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
@@ -167,5 +190,186 @@ export async function fetchTelegramVoiceAudio(
       duration_seconds: voice.duration,
       source_file_id: voice.file_id,
     },
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Voice flow orchestrator
+// ────────────────────────────────────────────────────────────────────
+
+export type VoiceFlowEnv = TelegramEnv & TranscriptionEnv;
+
+// Injected so voice.ts composes the same generateAssistantReply the text
+// path uses — keeps "shared assistant pipeline" a real shared function
+// rather than a voice-specific fork.
+export type AssistantPipeline = (text: string) => string;
+
+export interface VoiceFlowDeps {
+  assistantPipeline: AssistantPipeline;
+}
+
+export type VoiceFlowStatus =
+  | 'no_voice_payload'
+  | 'fetch_failed'
+  | 'transcription_env_invalid'
+  | 'transcription_failed'
+  | 'replied';
+
+export interface VoiceFlowOutcome {
+  status: VoiceFlowStatus;
+  reply_text: string | null;
+  transcript: string | null;
+  provider: string | null;
+}
+
+const FETCH_FALLBACK_REPLY =
+  "I couldn't pull that voice note from Telegram. Mind sending it again, or dropping a quick text?";
+const TRANSCRIPTION_UNAVAILABLE_REPLY =
+  "Voice transcription isn't configured for this environment yet — send me a quick text and I'll take it from there.";
+const TRANSCRIPTION_FAILED_REPLY =
+  "I heard the voice note but couldn't transcribe it cleanly. Want to try again or send it as text?";
+
+async function deliverReply(
+  event: InternalEvent,
+  env: VoiceFlowEnv,
+  logger: Logger,
+  replyText: string,
+): Promise<void> {
+  const token = env.TELEGRAM_BOT_TOKEN ?? '';
+  const send = await sendTelegramMessage(token, event.chat_id, replyText, {
+    replyToMessageId: event.message_id,
+  });
+
+  if (!send.ok) {
+    logger.error('telegram.voice.send.failed', {
+      event_id: event.id,
+      chat_id: event.chat_id,
+      status: send.status,
+      reason: send.description,
+    });
+    return;
+  }
+
+  recordOutbound({
+    event_id: event.id,
+    chat_id: event.chat_id,
+    reply_to_message_id: event.message_id,
+    sent_message_id: send.message_id,
+    text: replyText,
+  });
+
+  logger.info('telegram.voice.send.ok', {
+    event_id: event.id,
+    chat_id: event.chat_id,
+    reply_message_id: send.message_id,
+    reply_length: replyText.length,
+  });
+}
+
+export async function handleTelegramVoiceNote(
+  event: InternalEvent,
+  env: VoiceFlowEnv,
+  logger: Logger,
+  deps: VoiceFlowDeps,
+): Promise<VoiceFlowOutcome> {
+  const voice =
+    event.raw.message?.voice ?? event.raw.edited_message?.voice ?? null;
+
+  if (!voice) {
+    logger.warn('telegram.voice.payload_missing', { event_id: event.id });
+    return { status: 'no_voice_payload', reply_text: null, transcript: null, provider: null };
+  }
+
+  const token = env.TELEGRAM_BOT_TOKEN ?? '';
+  logger.info('telegram.voice.fetch.start', {
+    event_id: event.id,
+    file_id: voice.file_id,
+    duration: voice.duration,
+  });
+
+  const fetched = await fetchTelegramVoiceAudio(token, voice);
+  if (!fetched.ok) {
+    logger.error('telegram.voice.fetch.failed', {
+      event_id: event.id,
+      reason: fetched.reason,
+      detail: fetched.detail,
+      status: fetched.status,
+    });
+    await deliverReply(event, env, logger, FETCH_FALLBACK_REPLY);
+    return {
+      status: 'fetch_failed',
+      reply_text: FETCH_FALLBACK_REPLY,
+      transcript: null,
+      provider: null,
+    };
+  }
+
+  const transcriptionIssues = validateTranscriptionEnv(env);
+  if (!transcriptionIssues.ok) {
+    logger.error('env.transcription.invalid', { errors: transcriptionIssues.errors });
+    await deliverReply(event, env, logger, TRANSCRIPTION_UNAVAILABLE_REPLY);
+    return {
+      status: 'transcription_env_invalid',
+      reply_text: TRANSCRIPTION_UNAVAILABLE_REPLY,
+      transcript: null,
+      provider: null,
+    };
+  }
+
+  const provider = getTranscriptionProvider(env);
+  logger.info('transcription.start', {
+    event_id: event.id,
+    provider: provider.name,
+    ready: provider.ready,
+    bytes: fetched.audio.size,
+  });
+
+  const transcript = await provider.transcribe({
+    audio: fetched.audio.audio,
+    mime_type: fetched.audio.mime_type,
+    duration_seconds: fetched.audio.duration_seconds,
+    source_id: event.id,
+  });
+
+  if (!transcript.ok) {
+    logger.error('transcription.failed', {
+      event_id: event.id,
+      provider: transcript.provider,
+      reason: transcript.reason,
+      retryable: transcript.retryable,
+    });
+    await deliverReply(event, env, logger, TRANSCRIPTION_FAILED_REPLY);
+    return {
+      status: 'transcription_failed',
+      reply_text: TRANSCRIPTION_FAILED_REPLY,
+      transcript: null,
+      provider: transcript.provider,
+    };
+  }
+
+  logger.info('transcription.ok', {
+    event_id: event.id,
+    provider: transcript.provider,
+    text_length: transcript.text.length,
+    duration_ms: transcript.duration_ms,
+  });
+
+  const transcribedEvent: InternalEvent = { ...event, text: transcript.text };
+  recordInbound(transcribedEvent);
+
+  const replyText = deps.assistantPipeline(transcript.text);
+  logger.info('assistant.reply.generated', {
+    event_id: event.id,
+    kind: 'voice',
+    reply_length: replyText.length,
+  });
+
+  await deliverReply(event, env, logger, replyText);
+
+  return {
+    status: 'replied',
+    reply_text: replyText,
+    transcript: transcript.text,
+    provider: transcript.provider,
   };
 }
