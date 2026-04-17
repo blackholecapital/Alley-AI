@@ -32,8 +32,9 @@
       color: #a5a9b3;
     }
 
+    /* Panels shrink to make room for the voice footer (44 px) */
     .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
-              padding: 8px; height: calc(100vh - 42px); box-sizing: border-box; }
+              padding: 8px; height: calc(100vh - 42px - 44px); box-sizing: border-box; }
     .pane { display: flex; flex-direction: column;
             background: #15181e; border: 1px solid #2a2d34;
             border-radius: 8px; min-height: 0; }
@@ -65,6 +66,88 @@
     .calendar-action-result[data-state="fail"] { color: #ff6b6b; }
     #status-calendar[data-state="live"]  { color: #7cdc7c; }
     #status-calendar[data-state="error"] { color: #ff6b6b; }
+
+    /* ── S3: Voice capture footer ───────────────────────────────────── */
+    .voice-footer {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      height: 44px;
+      box-sizing: border-box;
+      background: #1a1d23;
+      border-top: 1px solid #2a2d34;
+      font-size: 13px;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+    }
+
+    .voice-status-badge {
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #2a2d34;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: #a5a9b3;
+      white-space: nowrap;
+      min-width: 72px;
+      text-align: center;
+    }
+    .voice-status-badge[data-state="requesting"] { background: #2a2d34; color: #f0c674; }
+    .voice-status-badge[data-state="recording"]  { background: #3d1f1f; color: #ff6b6b; animation: rec-pulse 1s ease-in-out infinite; }
+    .voice-status-badge[data-state="processing"] { background: #1a2d3d; color: #4da3ff; }
+    .voice-status-badge[data-state="sent"]       { background: #1a3d1f; color: #7cdc7c; }
+    .voice-status-badge[data-state="denied"]     { background: #3d1f1f; color: #ff9b9b; }
+    .voice-status-badge[data-state="unsupported"]{ background: #2a2d34; color: #ff6b6b; }
+    .voice-status-badge[data-state="error"]      { background: #3d1f1f; color: #ff6b6b; }
+
+    @keyframes rec-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .45; }
+    }
+
+    .voice-btn {
+      padding: 5px 14px;
+      border-radius: 6px;
+      border: 1px solid #3a3d44;
+      background: #2a2d34;
+      color: #e6e8eb;
+      cursor: pointer;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .voice-btn:hover:not(:disabled) { background: #3a3d44; }
+    .voice-btn:disabled { opacity: .4; cursor: default; }
+
+    .voice-btn-stop {
+      background: #4a1a1a;
+      border-color: #8b2222;
+      color: #ff9b9b;
+    }
+    .voice-btn-stop:hover:not(:disabled) { background: #5a2a2a; }
+
+    .voice-btn-cancel {
+      background: transparent;
+      border-color: transparent;
+      color: #6b6f78;
+    }
+    .voice-btn-cancel:hover:not(:disabled) { color: #a5a9b3; }
+
+    .voice-message {
+      color: #a5a9b3;
+      font-size: 12px;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .voice-message[data-ok="false"] { color: #ff9b9b; }
+    .voice-message[data-ok="true"]  { color: #7cdc7c; }
+
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -115,6 +198,129 @@
     </section>
   </main>
 
+  <!-- ── S3: Voice capture footer ─────────────────────────────────────
+       State badge + Talk / Stop & Send / Cancel buttons + status message.
+       Wired by the inline module script below; capture logic in voice-capture.js. -->
+  <footer class="voice-footer" role="region" aria-label="Voice capture">
+    <span class="voice-status-badge" id="voice-status-badge"
+          data-state="idle" aria-live="polite">idle</span>
+
+    <button class="voice-btn" id="voice-btn-start" aria-label="Start recording">
+      &#127899; Talk
+    </button>
+
+    <button class="voice-btn voice-btn-stop hidden" id="voice-btn-stop"
+            aria-label="Stop and send recording" disabled>
+      &#9632; Stop &amp; Send
+    </button>
+
+    <button class="voice-btn voice-btn-cancel hidden" id="voice-btn-cancel"
+            aria-label="Cancel recording" disabled>
+      &#10005; Cancel
+    </button>
+
+    <span class="voice-message" id="voice-message" aria-live="polite"></span>
+  </footer>
+
   <script type="module" src="./session-view.js"></script>
+
+  <!-- Voice capture wiring — imports voice-capture.js state machine -->
+  <script type="module">
+    import {
+      isSupported,
+      onStateChange,
+      startCapture,
+      stopAndSend,
+      cancelCapture,
+    } from './voice-capture.js';
+
+    const el = {
+      badge:  document.getElementById('voice-status-badge'),
+      start:  document.getElementById('voice-btn-start'),
+      stop:   document.getElementById('voice-btn-stop'),
+      cancel: document.getElementById('voice-btn-cancel'),
+      msg:    document.getElementById('voice-message'),
+    };
+
+    const LABELS = {
+      idle:        'idle',
+      requesting:  'requesting…',
+      recording:   'recording',
+      processing:  'sending…',
+      sent:        'sent',
+      denied:      'denied',
+      unsupported: 'unsupported',
+      error:       'error',
+    };
+
+    const MSGS = {
+      idle:        '',
+      requesting:  'Waiting for microphone permission…',
+      recording:   'Recording — press Stop & Send when done.',
+      processing:  'Sending audio to assistant…',
+      denied:      'Microphone permission denied. Grant mic access in browser settings and try again.',
+      unsupported: 'Voice capture is not supported in this browser. Use Chrome, Edge, or Firefox over HTTPS.',
+    };
+
+    function applyState(state, extra) {
+      if (el.badge) {
+        el.badge.textContent = LABELS[state] ?? state;
+        el.badge.dataset.state = state;
+      }
+
+      let msg = MSGS[state] ?? '';
+      let okAttr = null;
+
+      if (state === 'sent' && extra) {
+        if (extra.ok) {
+          msg = 'Audio received by assistant.';
+          okAttr = 'true';
+        } else {
+          const detail = (extra.error && (extra.error.message || extra.error.code)) || 'unknown error';
+          msg = `Send failed: ${detail}`;
+          okAttr = 'false';
+        }
+      } else if (state === 'error' && extra && extra.message) {
+        msg = `Error: ${extra.message}`;
+        okAttr = 'false';
+      } else if (state === 'denied' && extra && extra.message) {
+        msg = extra.message;
+        okAttr = 'false';
+      }
+
+      if (el.msg) {
+        el.msg.textContent = msg;
+        if (okAttr !== null) el.msg.dataset.ok = okAttr;
+        else delete el.msg.dataset.ok;
+      }
+
+      const isIdle      = state === 'idle';
+      const isRecording = state === 'recording';
+      const isBusy      = state === 'requesting' || state === 'processing';
+      const isTerminal  = state === 'denied' || state === 'unsupported' || state === 'error';
+
+      if (el.start) {
+        el.start.disabled = !(isIdle || isTerminal);
+        el.start.classList.toggle('hidden', isRecording || isBusy);
+      }
+      if (el.stop) {
+        el.stop.disabled = !isRecording;
+        el.stop.classList.toggle('hidden', !isRecording);
+      }
+      if (el.cancel) {
+        el.cancel.disabled = isBusy;
+        el.cancel.classList.toggle('hidden', isIdle || isBusy || state === 'sent');
+      }
+    }
+
+    onStateChange(applyState);
+
+    // Set initial state based on browser support
+    applyState(isSupported() ? 'idle' : 'unsupported', null);
+
+    el.start  && el.start.addEventListener('click',  () => { void startCapture(); });
+    el.stop   && el.stop.addEventListener('click',   () => { void stopAndSend(); });
+    el.cancel && el.cancel.addEventListener('click', () => { cancelCapture(); });
+  </script>
 </body>
 </html>

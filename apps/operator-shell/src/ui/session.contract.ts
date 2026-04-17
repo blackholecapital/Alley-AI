@@ -54,3 +54,25 @@ export interface SendResultErr {
   status: number;
 }
 export type SendResult = SendResultOk | SendResultErr;
+
+// S3: browser voice capture state machine.
+// Implemented in /apps/operator-shell/src/ui/voice-capture.js.
+export type VoiceCaptureState =
+  | 'idle'        // no capture in progress
+  | 'requesting'  // getUserMedia call in flight; permission prompt may appear
+  | 'recording'   // mic open, MediaRecorder accumulating chunks
+  | 'processing'  // recording stopped, audio uploading to /voice/capture
+  | 'sent'        // upload complete (ok or error); auto-resets to idle after 3 s
+  | 'denied'      // browser permission denied (NotAllowedError / NotFoundError)
+  | 'unsupported' // getUserMedia or MediaRecorder not available in this browser
+  | 'error';      // unexpected runtime failure
+
+export interface VoiceCaptureResultOk {
+  ok: true;
+  session_id: string | null;
+}
+export interface VoiceCaptureResultErr {
+  ok: false;
+  error: { code: string; message: string };
+}
+export type VoiceCaptureResult = VoiceCaptureResultOk | VoiceCaptureResultErr;
