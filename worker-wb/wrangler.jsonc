@@ -5,7 +5,6 @@
   "name": "ali-ai",
   "main": "src/index.ts",
   "compatibility_date": "2025-04-01",
-  "compatibility_flags": ["nodejs_compat"],
 
   // ── Public testing route ──────────────────────────────────────────
   // workers_dev = true exposes <name>.<account>.workers.dev which is
