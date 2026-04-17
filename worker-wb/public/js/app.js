@@ -1,26 +1,16 @@
 /**
  * app.js — Operator UI client, aligned to worker-wb routes.
+ * S5: calendar status polling, voice event badges, action state display.
  *
- * The worker exposes /health, /session/latest, and /telegram/webhook
- * (see worker-wb/src/index.ts). The legacy /api/status and /api/message
- * paths no longer exist and must not be called from this UI.
- *
- * Responsibilities:
- *  - Poll /health for Core status and /session/latest for session id,
- *    last-event timestamp, and transcript/response events.
- *  - Render inbound events into #transcript-log and outbound events
- *    into #response-log using existing pane DOM hooks.
- *  - Send button POSTs a best-effort message envelope to
- *    /telegram/webhook and echoes the operator's text in the transcript
- *    so the input is never silently dropped on the client side.
- *  - No hardcoded assistant response strings — all rendered text comes
- *    from /session/latest.
+ * Routes consumed: /health, /session/latest, /calendar/status, /ui/send.
+ * Ref: build-sheet-EXEC-AI-STAGE3-004 S5 (Worker B).
  */
 
 "use strict";
 
 const HEALTH_ENDPOINT = "/health";
 const SESSION_ENDPOINT = "/session/latest";
+const CALENDAR_ENDPOINT = "/calendar/status";
 const SEND_ENDPOINT = "/ui/send";
 const POLL_MS = 5000;
 
@@ -35,6 +25,10 @@ const DOM = {
   talkBtn: () => document.getElementById("talk-btn"),
   talkIcon: () => document.getElementById("talk-icon"),
   talkLabel: () => document.getElementById("talk-label"),
+  // S5: calendar surface
+  calendarStatus: () => document.getElementById("status-calendar"),
+  calendarBar: () => document.getElementById("calendar-action-bar"),
+  calendarResult: () => document.getElementById("calendar-action-result"),
 };
 
 let lastRenderedId = null;
@@ -65,12 +59,28 @@ function fmtTime(iso) {
   });
 }
 
-function makeEntry(role, text, timestamp, isError) {
+// S5: kind badge for voice / other events.
+function kindBadge(kind) {
+  if (kind === "voice") return "\uD83C\uDF99 voice";
+  if (kind === "other") return "\u2022 other";
+  return null;
+}
+
+function makeEntry(role, text, timestamp, isError, kind) {
   const wrap = document.createElement("div");
   wrap.className = "entry entry-" + role + (isError ? " entry-error" : "");
 
+  // S5: badge row for non-text kinds
+  const badge = kindBadge(kind);
+  if (badge) {
+    const b = document.createElement("div");
+    b.className = "entry-kind-badge";
+    b.textContent = badge;
+    wrap.appendChild(b);
+  }
+
   const body = document.createElement("div");
-  body.textContent = text;
+  body.textContent = text || (kind === "voice" ? "[voice note — transcription pending]" : "[" + (kind || "?") + "]");
   wrap.appendChild(body);
 
   const meta = document.createElement("div");
@@ -83,7 +93,7 @@ function makeEntry(role, text, timestamp, isError) {
 
 function renderSnapshot(data) {
   if (data.session && data.session.session_id) {
-    setText(DOM.session(), String(data.session.session_id).slice(0, 8) + "…");
+    setText(DOM.session(), String(data.session.session_id).slice(0, 8) + "\u2026");
   }
 
   const raw = Array.isArray(data.items) ? data.items : [];
@@ -101,13 +111,60 @@ function renderSnapshot(data) {
     const pane = item.direction === "outbound" ? rpane : tpane;
     if (!pane) continue;
     const role = item.direction === "outbound" ? "assistant" : "user";
-    const text = item.text || "[" + item.kind + "]";
-    pane.appendChild(makeEntry(role, text, item.at, false));
+    // S5: pass kind so voice events render clearly even when text is null.
+    pane.appendChild(makeEntry(role, item.text, item.at, false, item.kind));
   }
   if (tpane) tpane.scrollTop = tpane.scrollHeight;
   if (rpane) rpane.scrollTop = rpane.scrollHeight;
 
   lastRenderedId = newestId;
+}
+
+// S5: render /calendar/status response into the calendar action bar.
+function renderCalendar(data) {
+  const statusEl = DOM.calendarStatus();
+  const barEl = DOM.calendarBar();
+  const resultEl = DOM.calendarResult();
+
+  if (!data || !data.provider) {
+    setText(statusEl, "—");
+    if (barEl) barEl.classList.add("hidden");
+    return;
+  }
+
+  // Status bar pill: "demo ready" / "unconfigured" / "err"
+  const providerReady = data.provider && data.provider.ready;
+  const providerName = (data.provider && data.provider.provider) || "—";
+  setText(statusEl, providerReady ? providerName + " ready" : providerName + " not ready");
+  if (statusEl) {
+    statusEl.dataset.state = providerReady ? "live" : "error";
+  }
+
+  // Calendar action bar: show last invocation result if present.
+  const inv = data.invocation;
+  if (!inv) {
+    if (barEl) barEl.classList.add("hidden");
+    return;
+  }
+
+  if (barEl) barEl.classList.remove("hidden");
+  if (!resultEl) return;
+
+  if (inv.ok) {
+    const count = inv.payload && inv.payload.event_count != null
+      ? " · " + inv.payload.event_count + " event" + (inv.payload.event_count === 1 ? "" : "s")
+      : "";
+    resultEl.textContent =
+      "\u2713 calendar.list_today ok" + count +
+      " · " + fmtTime(inv.handled_at);
+    resultEl.dataset.state = "ok";
+  } else {
+    const code = (inv.error && inv.error.code) || "error";
+    resultEl.textContent =
+      "\u2717 calendar.list_today failed (" + code + ")" +
+      " · " + fmtTime(inv.handled_at);
+    resultEl.dataset.state = "fail";
+  }
 }
 
 async function refreshHealth() {
@@ -139,9 +196,25 @@ async function refreshSession() {
   }
 }
 
+// S5: poll /calendar/status (no ?run — status only, no side effects).
+async function refreshCalendar() {
+  try {
+    const res = await fetch(CALENDAR_ENDPOINT, { cache: "no-store" });
+    if (!res.ok) {
+      setText(DOM.calendarStatus(), "err");
+      return;
+    }
+    const data = await res.json();
+    renderCalendar(data);
+  } catch (_) {
+    setText(DOM.calendarStatus(), "—");
+  }
+}
+
 function poll() {
   refreshHealth();
   refreshSession();
+  refreshCalendar();
 }
 
 poll();

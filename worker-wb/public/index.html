@@ -23,7 +23,17 @@
     <span class="status-item">Boot: <span class="status-value" id="status-boot">—</span></span>
     <span class="status-divider">|</span>
     <span class="status-item">Session: <span id="status-session" class="status-value monospace">—</span></span>
+    <span class="status-divider">|</span>
+    <span class="status-item">Calendar: <span id="status-calendar" class="status-value">—</span></span>
   </header>
+
+  <!-- ── Calendar action result bar (S5) ──────────────────────────────
+       Hidden until /calendar/status returns an invocation result.
+       #calendar-action-result carries data-state="ok"|"fail" for styling. -->
+  <div id="calendar-action-bar" class="calendar-action-bar hidden">
+    <span class="calendar-action-label">Last calendar action:</span>
+    <span id="calendar-action-result" class="calendar-action-result">—</span>
+  </div>
 
   <!-- ── Main panels ────────────────────────────────────────────────── -->
   <main class="panels">
