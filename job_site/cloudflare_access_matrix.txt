@@ -1,210 +1,256 @@
-CLOUDFLARE ACCESS MATRIX — EXEC-AI-STAGE2-003 | CF-PREP | WORKER B
+CLOUDFLARE ACCESS MATRIX — EXEC-AI-STAGE3-004 | CF-PREP | WORKER B
 ===================================================================
-Generated: 2026-04-16
-Branch:    claude/verify-cloudflare-access-oKfsP
+Generated: 2026-04-17
+Branch:    claude/verify-api-endpoints-dxGjT
 Stage:     CF-PREP (Cloudflare Deployment Prep)
 Task:      Verify Access expectations for /, /health, /telegram/webhook,
-           /session/latest and record any path likely to be blocked or
-           mismapped.
+           /session/latest, and /calendar/status and record any path
+           likely to be blocked or mismapped.
 
 -------------------------------------------------------------------
 1. SOURCE OF TRUTH
 -------------------------------------------------------------------
-build sheet:        /job_site/build-sheet-EXEC-AI-STAGE2-003.txt
+build sheet:        /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
 wrangler config:    /worker-wb/wrangler.jsonc
 worker entrypoint:  /worker-wb/src/index.ts
 static assets root: /worker-wb/public  (wrangler "assets.directory": "./public")
-stage 1 evidence:   /worker-wb/deploy_log.txt
-                    /worker-wb/deployment_config_evidence.txt
+operator UI script: /worker-wb/public/js/app.js
+prior CF artifacts: /job_site/cloudflare_access_matrix.txt (Stage 2 history)
+                    /job_site/cloudflare_prep_report.txt   (Stage 2 deploy paths)
 
-build-sheet declarations:
+build-sheet declarations (Stage 3):
   access_policy_expected:      bypass_paths
-  required_public_test_routes: / , /health , /telegram/webhook , /session/latest
+  required_public_test_routes: / , /health , /telegram/webhook ,
+                               /session/latest , /calendar/status
   workers_dev_required:        yes
   preview_urls_required:       yes
-  custom_domain_if_any:        existing Stage 1 custom domain
+  custom_domain_if_any:        existing Stage 2 live custom domain
 
-wrangler.jsonc declarations:
+wrangler.jsonc declarations (current):
   name:          "ali-ai"
   main:          "src/index.ts"
   workers_dev:   true   (non-gated *.workers.dev URL available)
   preview_urls:  true
   assets:        { directory: "./public" }   (static UI shell)
 
+src/index.ts router state (current, pre-S4):
+  matched paths: /telegram/webhook, /session/latest, /health, /ui/send
+  unmatched   :  /calendar/status  -> 404 (handler not yet created;
+                 S4 worker_a owes /worker-wb/src/routes/calendar-status.ts)
+
+reference-manual note:
+  build sheet cites /job_site/factory-manual-v1.1.txt; file on disk is
+  /job_site/factory-manual-v1.11.txt (v1.11 lean). Treated as the same
+  active manual per its PRECEDENCE LAW. Flag only.
+
 -------------------------------------------------------------------
 2. ACCESS SURFACE MODEL
 -------------------------------------------------------------------
-Two public surfaces exist for the same Worker ("ali-ai"):
+Two public surfaces continue to exist for the Worker ("ali-ai"):
 
   A. workers.dev surface — ali-ai.<account>.workers.dev
      - Not covered by Cloudflare Access / Zero Trust.
      - Reachable by curl, Telegram, browsers without login.
-     - This is the declared "public testing" surface.
-     - Confirmed by commit ef3b026 "Enable workers_dev route to bypass
-       Cloudflare Access gate for testing" and wrangler.jsonc lines 11-14.
+     - Declared "public testing" surface; safe webhook target.
+     - Confirmed by wrangler.jsonc `workers_dev: true` (line 14).
 
-  B. Custom-domain surface — the Stage 1 custom domain
-     - Fronted by Cloudflare Access (Zero Trust) per Stage 1 history.
+  B. Custom-domain surface — Stage 2 live custom domain
+     - Fronted by Cloudflare Access (Zero Trust).
      - Default behavior: 302 redirect to Access login for every path.
-     - Only paths explicitly whitelisted by an Access "Bypass" policy
-       are reachable by anonymous clients (browser, curl, Telegram).
-     - Stage 1 operator notes flag "Access overlap" as the main prior
-       time-loss pattern — this matrix pre-empts it.
+     - Only paths whitelisted by an Access "Bypass" policy are
+       reachable by anonymous clients (browser, curl, Telegram).
+     - Stage 2 "Access overlap" remains the dominant prior-art risk.
 
 -------------------------------------------------------------------
 3. PATH-BY-PATH ACCESS EXPECTATIONS
 -------------------------------------------------------------------
 
 PATH:              /
-  Served by:       /worker-wb/public/index.html (static asset)
+  Served by:       /worker-wb/public/index.html (Workers Assets)
   Consumer:        human operator browser (UI shell)
   workers.dev:     PUBLIC — no Access.            Expected: 200 HTML
-  Custom domain:   MUST be Access-bypassed OR behind Access (operator
-                   login tolerated). If UI is demo-visible without login
-                   it must be in the bypass set.
-                   Expected after bypass: 200 HTML
+  Custom domain:   MUST be Access-bypassed if the demo expects an
+                   anonymous UI load; otherwise operator login is
+                   tolerated but every visitor sees the Access page
+                   first.                          Expected: 200 HTML
   Current worker:  Asset handler serves public/index.html; src/index.ts
                    returns 404 only for non-asset paths.
-  Likely issue:    If Access is applied at zone level with no bypass and
-                   the demo expects an anonymous UI load, "/" will 302
-                   to Access login instead of returning the UI.
+  Likely issue:    OK on workers.dev. On custom domain without bypass,
+                   "/" 302s to Access login instead of returning the UI.
 
 PATH:              /health
-  Served by:       src/index.ts fetch handler (NOT YET IMPLEMENTED)
+  Served by:       src/index.ts -> handleHealth (/worker-wb/src/routes/health.ts)
   Consumer:        operator probe, CF-TEST checklist, uptime curl
   workers.dev:     PUBLIC — no Access.            Expected: 200 JSON {ok:true}
-  Custom domain:   MUST be in Access Bypass path set (access_policy_expected
-                   = bypass_paths).                Expected: 200 JSON
-  Current worker:  src/index.ts returns 404 for every request. /health is
-                   NOT wired — will return 404 even on workers.dev until
-                   Stage 2 S2/S5 adds the handler.
-  Likely issue:    MISMAPPED — required public route declared in build
-                   sheet has no route handler in the current Worker. Even
-                   if Access is configured correctly, /health will 404.
+  Custom domain:   MUST be in the Access Bypass path set
+                   (access_policy_expected = bypass_paths).
+                                                  Expected: 200 JSON
+  Current worker:  IMPLEMENTED (Stage 2 S2). Route returns 200 on
+                   workers.dev today.
+  Likely issue:    Custom-domain probes 302 to login if /health is not
+                   in the Bypass policy. No code mismap.
 
 PATH:              /telegram/webhook
-  Served by:       src/index.ts fetch handler (NOT YET IMPLEMENTED)
-  Consumer:        Telegram servers (third-party, cannot authenticate
-                   through Cloudflare Access — no interactive login,
-                   no service token).
+  Served by:       src/index.ts -> handleTelegramWebhook
+                   (/worker-wb/src/routes/telegram-webhook.ts)
+  Consumer:        Telegram servers (third-party; no interactive login,
+                   no Access service token, no CF-Access-Client-* header).
   workers.dev:     PUBLIC — no Access.            Expected: 200 ack
-                   THIS IS THE ONLY SAFE WEBHOOK SURFACE until a bypass
-                   rule exists on the custom domain.
-  Custom domain:   MUST be Access-bypassed. Telegram cannot pass an
-                   Access login flow, so any Access gate on this path
-                   will drop every Telegram update with a 302 to the
-                   login page — Telegram marks this as "last_error".
-  Current worker:  No /telegram/webhook route. Current index.ts returns
-                   404 for all non-asset paths.
-  Likely issue:    HIGH-RISK BLOCK — if the Telegram webhook is ever
-                   registered against the custom domain without a bypass,
-                   100% of inbound updates are dropped at the Access
-                   layer before the Worker runs. S2 must register the
-                   webhook against the *.workers.dev URL OR add a bypass
-                   policy for /telegram/webhook on the custom domain.
-                   Also MISMAPPED vs the existing reference runtime doc
-                   (/job_site/executive_assistant_runtime/docs/cloudflare_runtime.md)
-                   which uses "/webhook/<SECRET_PATH>" — Stage 2 path
-                   contract is "/telegram/webhook"; reference pattern
-                   must be adapted, not copied literally.
+                   ONLY SAFE WEBHOOK SURFACE until a Bypass rule is
+                   confirmed on the custom domain.
+  Custom domain:   MUST be Access-bypassed. Telegram cannot satisfy
+                   any Access flow; a gate drops 100% of updates with
+                   a 302 to login (Telegram surfaces this as
+                   "last_error" on getWebhookInfo).
+  Current worker:  IMPLEMENTED. Route exists and is wired.
+  Likely issue:    HIGH-RISK BLOCK if the Telegram webhook is ever
+                   registered against the custom domain without an
+                   Access Bypass for /telegram/webhook. Stage 3 voice
+                   round-trip (S3) will silently fail in that case.
+                   Register against *.workers.dev OR confirm bypass
+                   before voice/text demo runs.
 
 PATH:              /session/latest
-  Served by:       src/index.ts fetch handler (NOT YET IMPLEMENTED)
-  Consumer:        operator UI shell (fetched from the same origin that
-                   served "/"), visible-event render loop per S3.
+  Served by:       src/index.ts -> handleSessionLatest
+                   (/worker-wb/src/routes/session-latest.ts)
+  Consumer:        operator UI shell (same-origin XHR from "/"),
+                   visible-event render loop (Stage 3 S5 expands the
+                   state contract; route remains the same).
   workers.dev:     PUBLIC — no Access.            Expected: 200 JSON state
   Custom domain:   MUST be Access-bypassed whenever the UI itself is
-                   public. If UI is behind Access but /session/latest
-                   is not, a cross-origin / login-redirect mismatch
-                   breaks the XHR and the UI goes blank. Both paths
-                   must be in the same Access posture (both bypassed,
-                   or both gated).
-  Current worker:  No /session/latest route; current index.ts returns
-                   404. Also note the UI in /worker-wb/public/js/app.js
-                   currently fetches /api/status and /api/message, NOT
-                   /session/latest — contract drift between UI and the
-                   build-sheet-declared route.
-  Likely issue:    MISMAPPED — route does not exist yet AND the UI is
-                   still wired to /api/status + /api/message (legacy
-                   Stage 1 contract). Stage 2 S3 must both add the
-                   /session/latest handler and update the UI fetches,
-                   otherwise Access posture verification can pass while
-                   the live demo still fails silently.
+                   anonymous. UI and /session/latest must share the
+                   same Access posture; mismatch breaks the XHR with a
+                   login redirect and the UI goes blank.
+  Current worker:  IMPLEMENTED. /worker-wb/public/js/app.js fetches
+                   /session/latest at SESSION_ENDPOINT (app.js:23),
+                   so the Stage 2 UI/route contract drift is resolved.
+  Likely issue:    Custom-domain 302 if not bypassed. No code mismap.
+                   S5 will expand state fields; the route path is stable.
+
+PATH:              /calendar/status
+  Served by:       NOT YET IMPLEMENTED. Owed by Stage 3 S4 worker_a:
+                   /worker-wb/src/routes/calendar-status.ts and a
+                   matching branch in src/index.ts router.
+  Consumer:        operator UI (calendar action visibility per S5),
+                   operator probe, CF-TEST checklist.
+  workers.dev:     PUBLIC — no Access (once handler ships).
+                                                  Expected: 200 JSON status
+  Custom domain:   MUST be added to the Access Bypass path set.
+                   access_policy_expected = bypass_paths covers the
+                   intent, but the operator must explicitly add
+                   /calendar/status to the policy alongside the four
+                   Stage 2 paths; it is NOT inherited automatically.
+  Current worker:  src/index.ts has no /calendar/status branch
+                   (verified: only /telegram/webhook, /session/latest,
+                   /health, /ui/send are matched). Returns 404 today.
+  Likely issue:    MISMAPPED today — declared public test route with no
+                   handler. CF-TEST will fail this path until S4 lands.
+                   Additionally, custom-domain Bypass policy must be
+                   updated to include /calendar/status when the route
+                   ships, or live-demo calendar status will 302 to login
+                   even though the Worker is healthy.
 
 -------------------------------------------------------------------
 4. SUMMARY MATRIX
 -------------------------------------------------------------------
-path                 workers.dev   custom-domain   worker handler   status
--------------------  ------------  --------------  ---------------  ------
-/                    public ok     bypass or gated assets OK        OK-ish
-/health              public ok     must-bypass     MISSING          BLOCK
-/telegram/webhook    public ok     must-bypass     MISSING          BLOCK
-/session/latest      public ok     must-bypass     MISSING          BLOCK
+path                 workers.dev   custom-domain    worker handler   status
+-------------------  ------------  ---------------  ---------------  ------
+/                    public ok     bypass-or-gated  assets OK        OK-ish
+/health              public ok     must-bypass      IMPLEMENTED      OK
+/telegram/webhook    public ok     must-bypass      IMPLEMENTED      OK*
+/session/latest      public ok     must-bypass      IMPLEMENTED      OK
+/calendar/status     public ok     must-bypass-NEW  MISSING          BLOCK
 
 Legend:
-  OK-ish  = reachable today via asset handler; verify Access policy only
-  BLOCK   = will not return the declared response even if Access is
-            correct, because the route is not implemented in
-            /worker-wb/src/index.ts
-  MISSING = no handler in src/index.ts for this path
-  must-bypass = required in the Access "Bypass" path set per
-                access_policy_expected = bypass_paths
+  OK       = handler exists; Access posture is the only remaining gate
+  OK*      = handler exists; webhook target surface choice is the gate
+             (workers.dev safe, custom domain requires bypass)
+  OK-ish   = served by asset handler; verify no S2/S3 route shadows "/"
+  BLOCK    = will not return the declared response even if Access is
+             correct, because the route is not implemented in
+             /worker-wb/src/index.ts
+  MISSING  = no handler in src/index.ts for this path
+  must-bypass     = required in the Access "Bypass" path set
+                    (access_policy_expected = bypass_paths)
+  must-bypass-NEW = must be ADDED to the existing bypass set in Stage 3;
+                    not inherited from Stage 2 Access policy
 
 -------------------------------------------------------------------
 5. PATHS LIKELY TO BE BLOCKED OR MISMAPPED
 -------------------------------------------------------------------
 BLOCKED (Access-layer risk on custom domain):
-  - /telegram/webhook   — third-party caller (Telegram) cannot clear
-                          Access; highest priority bypass.
-  - /session/latest     — browser XHR from UI fails if Access redirects
-                          to login HTML instead of returning JSON.
-  - /health             — operator/CI probes will fail against the
-                          custom domain if bypass is missing.
+  - /telegram/webhook  — third-party caller (Telegram) cannot clear
+                         Access; highest priority bypass. Highest
+                         demo-impact path because S2/S3 text and voice
+                         loops both depend on it.
+  - /session/latest    — browser XHR from UI fails if Access redirects
+                         to login HTML instead of returning JSON; UI
+                         goes blank during the demo.
+  - /calendar/status   — same XHR-vs-redirect risk as /session/latest
+                         AND must be explicitly added to the Bypass
+                         policy in Stage 3; not covered by the Stage 2
+                         policy set.
+  - /health            — operator/CI probes 302 against the custom
+                         domain if /health is not in the bypass set.
+  - /                  — anonymous demo viewers hit the Access login
+                         instead of the UI shell if "/" is not bypassed.
 
 MISMAPPED (route not implemented or contract drift):
-  - /health             — declared public test route, no handler in
-                          src/index.ts (returns 404 today).
-  - /telegram/webhook   — declared public test route, no handler;
-                          reference runtime doc uses "/webhook/<SECRET>"
-                          path shape instead of "/telegram/webhook".
-  - /session/latest     — declared public test route, no handler;
-                          UI currently fetches /api/status and
-                          /api/message (see /worker-wb/public/js/app.js
-                          lines 32, 67) — UI contract must be realigned
-                          in S3 or the demo will be invisible.
-  - /                   — static asset handler serves public/index.html
-                          today; verify no conflicting route pattern is
-                          added in S2/S3 that would shadow the asset
-                          at "/".
+  - /calendar/status   — declared public test route in the Stage 3
+                         build sheet, but src/index.ts has NO matching
+                         branch and /worker-wb/src/routes/calendar-status.ts
+                         does not exist yet. Owed by S4 worker_a.
+                         CF-PREP cannot self-resolve this; downstream
+                         stage must implement before CF-TEST.
+  - /                  — currently served by the Workers Assets handler.
+                         Verify that S4/S5 do not register a new "/"
+                         route in src/index.ts that would shadow the
+                         asset and break the UI shell.
+  - (resolved) /session/latest UI contract — Stage 2 drift to
+                         /api/status + /api/message has been corrected;
+                         /worker-wb/public/js/app.js now fetches
+                         /session/latest. No further realignment needed
+                         for CF-PREP.
+  - (resolved) /telegram/webhook reference-doc shape — runtime doc
+                         /webhook/<SECRET_PATH> pattern was Stage 2
+                         drift; current Worker matches the build-sheet
+                         path /telegram/webhook. Keep adapted shape.
 
 -------------------------------------------------------------------
 6. RECOMMENDED ACCESS POSTURE (for CF-PREP handoff)
 -------------------------------------------------------------------
 - Keep workers_dev = true as the guaranteed-public test surface for
-  CF-TEST and for the Telegram webhook registration until a bypass
-  policy is confirmed on the custom domain.
-- On the Stage 1 custom domain, the Access Application must include a
-  Bypass policy for exactly these four paths:
+  CF-TEST and for Telegram webhook registration until the custom-domain
+  Bypass policy is confirmed to include all five Stage 3 paths.
+- On the Stage 2 custom domain, the Access Application's Bypass
+  policy MUST list exactly these five paths for Stage 3:
       /
       /health
       /telegram/webhook
       /session/latest
+      /calendar/status
+  The fifth path (/calendar/status) is NEW for Stage 3; an unchanged
+  Stage 2 Access policy will block it even after S4 ships the handler.
 - Do NOT rely on a service-token / CF-Access-Client-Id header for
-  /telegram/webhook — Telegram will not send those headers.
-- Before S2 code changes, confirm with operator which surface the demo
-  runs against (workers.dev vs custom domain). If custom domain, the
-  bypass policy above is a hard prerequisite; if workers.dev, no
-  Access change is needed but the URL must be used for webhook
-  registration and UI origin.
+  /telegram/webhook — Telegram does not send those headers.
+- Before any S2/S3/S4 demo run, confirm with the operator which
+  surface the demo runs against (workers.dev vs custom domain). If
+  custom domain, the five-path bypass above is a hard prerequisite;
+  if workers.dev, no Access change is needed but the *.workers.dev
+  URL must be used for both webhook registration and UI origin.
+- Treat /calendar/status as the single net-new Access surface for
+  Stage 3 — flag it in the operator handoff so the bypass update is
+  not forgotten when S4 deploys.
 
 -------------------------------------------------------------------
 7. ARTIFACT SELF-CHECK
 -------------------------------------------------------------------
-expected_artifact:          /job_site/cloudflare_access_matrix.txt
-written_at:                 /home/user/ALI-ai/job_site/cloudflare_access_matrix.txt
-covers four declared paths: yes (/, /health, /telegram/webhook, /session/latest)
-records blocks/mismaps:     yes (section 5)
+expected_artifact:           /job_site/cloudflare_access_matrix.txt
+written_at:                  /home/user/ALI-ai/job_site/cloudflare_access_matrix.txt
+covers five declared paths:  yes (/, /health, /telegram/webhook,
+                                  /session/latest, /calendar/status)
+records blocks/mismaps:      yes (section 5)
 required_references_read:
   - /job_site/factory-manual-v1.1.txt   (present as factory-manual-v1.11.txt)
   - /job_site/worker-execution-manual-v1.1.txt
-  - /job_site/build-sheet-EXEC-AI-STAGE2-003.txt
+  - /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
