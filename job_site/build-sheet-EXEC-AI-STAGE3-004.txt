@@ -1,0 +1,705 @@
+job:
+job_id: EXEC-AI-STAGE3-004
+job_name: Executive AI Assistant Stage 3 — Voice + Calendar + Reply Path
+objective: Turn the Stage 2 prototype into a tighter live demo by completing the voice loop, adding one reliable calendar action, and making text and voice reply by default.
+requested_outcome: A live Cloudflare-deployed demo where Telegram text and Telegram voice both produce real assistant replies, one simple calendar action works end-to-end, the UI shows the full event trail, and failure states are readable.
+factory_approved_chassis: attached for reference
+job_site_root: /job_site
+reference_materials:
+- blackholecapital/ALI-ai repo
+- attached FULLBODY-CHASSIE-V1-FROZEN reference chassis
+- Stage 1 TPS report
+- Stage 2 TPS report
+- grammY repo for Telegram transport and handler patterns
+- linuz90/claude-telegram-bot repo for Telegram text + voice assistant patterns
+- letta-ai/lettabot repo for session, assistant, and scheduling patterns
+- permaevidence/ConciergeforTelegram repo for calendar + assistant flow ideas
+- AIXerum/AI-Telegram-Assistant repo for calendar action boundaries
+- grinev/opencode-telegram-bot repo for responsive Telegram UX and session-state ideas
+active_run_docs:
+- /job_site/factory-manual-v1.1.txt
+- /job_site/foreman-manual-v1.1.txt
+- /job_site/worker-execution-manual-v1.1.txt
+- /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+operator_notes:
+- Scope lock: voice loop, one calendar action, and reply-path polish only
+- No telephony expansion in this run
+- No broad UI redesign in this run
+- No multi-action calendar agent in this run
+- Text path must reply by default, not just acknowledge receipt
+- Voice can close with text fallback if spoken-audio reply is not stable enough for this stage
+
+run_control:
+control_interface: Factory Control Interface
+execution_foreman: "Foreman A the Blueprint Foreman"
+checksum_foreman: "Foreman B the Systems Foreman"
+mode: single
+final_validator: Factory Control Interface
+
+output_rules:
+stage_activity_log: /job_site/stage_activity_log.txt
+final_tps_report: /job_site/TPS_REPORT.txt
+mandatory_foreman_tag_block:
+- job_id
+- foreman
+- current_stage
+- current_pass
+- next_stage
+- next_owner
+- passes_remaining
+- status
+- current_action
+mandatory_foreman_execution_block:
+- artifacts
+- checkpoint_result
+- handoff_instruction
+- issue_if_patch_or_error
+mandatory_worker_output:
+- "[PROJECT | WORKER | STAGE | RESULT]"
+- status
+- artifacts
+- summary
+- issues_if_patch
+
+cloudflare_deployment_plan:
+cloudflare_deploy_required: yes
+deployment_target: workers
+app_root_path: /worker-wb
+wrangler_config_path: /worker-wb/wrangler.jsonc
+deploy_command: cd worker-wb && npm run deploy
+build_command: wrangler-managed TypeScript bundle
+asset_directory_if_any: declare exact UI asset path if used; otherwise none
+custom_domain_if_any: existing Stage 2 live domain
+workers_dev_required: yes
+preview_urls_required: yes
+access_policy_expected: bypass_paths
+required_public_test_routes:
+- /
+- /health
+- /telegram/webhook
+- /session/latest
+- /calendar/status
+required_operator_checks:
+- confirm root path is correct
+- confirm wrangler config matches actual app structure
+- confirm deploy command runs from the correct directory
+- confirm Cloudflare route resolves
+- confirm /health route responds
+- confirm UI route responds if UI is in scope
+- confirm Access is not blocking required public endpoints
+- confirm asset path matches actual UI output if assets are used
+accepted_validation_evidence:
+- exact_repo_url
+- cloudflare_dashboard_screenshot
+- deployed_route_screenshot
+- runtime_response_screenshot
+- foreman_handoff_text
+- worker_handoff_text
+
+stages:
+
+stage_id: S1
+stage_name: Stage 3 scope and target lock
+owner: Factory Control Interface
+goal: Freeze the Stage 3 target, approved references, and success criteria before code changes.
+inputs:
+Stage 2 TPS report
+live UI/runtime evidence
+current repo state
+approved external reference repos
+worker_orders:
+worker_a:
+assigned: no
+task:
+expected_artifacts: []
+required_references:
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+worker_b:
+assigned: no
+task:
+expected_artifacts: []
+required_references:
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+required_stage_artifacts:
+/job_site/stage3_scope_lock.txt
+/job_site/reference_repo_matrix.txt
+required_log_entries:
+stage 3 scope locked
+stage 3 references recorded
+checkpoint:
+checkpoint_id: S1-CHECK
+pass_condition: Scope is explicitly locked to reply-path polish, voice loop, one calendar action, and UI status visibility only.
+patch_condition: Scope expands into telephony, broad polish, multi-action calendar, or unrelated integrations.
+handoff:
+on_pass:
+next_stage: CF-PREP
+next_owner: "Foreman A the Blueprint Foreman"
+on_patch:
+return_stage: S1
+return_owner: Factory Control Interface
+on_error:
+return_to: Factory Control Interface
+stage_id: CF-PREP
+stage_name: Cloudflare Deployment Prep
+owner: "Foreman A the Blueprint Foreman"
+goal: Verify deploy path, public routes, and access assumptions before Stage 3 wiring.
+inputs:
+/worker-wb/wrangler.jsonc
+/worker-wb/package.json
+Stage 2 deploy evidence
+current Access config evidence
+worker_orders:
+worker_a:
+assigned: yes
+task: Verify exact deploy root, wrangler path, deploy command, and required public routes for Stage 3. Record only current-valid Cloudflare paths and commands.
+expected_artifacts:
+/job_site/cloudflare_prep_report.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+worker_b:
+assigned: yes
+task: Verify Access expectations for /, /health, /telegram/webhook, /session/latest, and /calendar/status and record any path likely to be blocked or mismapped.
+expected_artifacts:
+/job_site/cloudflare_access_matrix.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+required_stage_artifacts:
+/job_site/cloudflare_prep_report.txt
+/job_site/cloudflare_access_matrix.txt
+required_log_entries:
+cloudflare prep complete
+checkpoint:
+checkpoint_id: CF-PREP-CHECK
+pass_condition: Deploy root, wrangler path, deploy command, and public test routes are explicit and current.
+patch_condition: Root path drift, wrong wrangler path, unresolved Access expectation, or undeclared asset path.
+handoff:
+on_pass:
+next_stage: S2
+next_owner: "Foreman A the Blueprint Foreman"
+on_patch:
+return_stage: CF-PREP
+return_owner: "Foreman A the Blueprint Foreman"
+on_error:
+return_to: Factory Control Interface
+stage_id: S2
+stage_name: Reply-path polish for text
+owner: "Foreman A the Blueprint Foreman"
+goal: Ensure text messages generate real assistant replies by default and are reflected in the UI.
+inputs:
+current Telegram text pipeline
+current session/event routes
+Stage 2 UI path
+worker_orders:
+worker_a:
+assigned: yes
+task: Wire the inbound text path so text messages produce assistant responses by default instead of receipt-only acknowledgements. Keep the shared pipeline intact.
+expected_artifacts:
+/worker-wb/src/integrations/telegram/inbound.ts
+/worker-wb/src/integrations/telegram/outbound.ts
+/worker-wb/src/routes/telegram-webhook.ts
+/worker-wb/src/lib/session-store.ts
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+/job_site/reference_repo_matrix.txt
+repo_mirror_required: yes
+commit_required: yes
+push_required: yes
+worker_b:
+assigned: yes
+task: Add tests or fixtures proving two-way text behavior across two consecutive messages and update the operator demo checklist.
+expected_artifacts:
+/worker-wb/test/telegram-text-reply-default.test.ts
+/job_site/text_reply_demo_checklist.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: yes
+commit_required: yes
+push_required: yes
+required_stage_artifacts:
+/worker-wb/test/telegram-text-reply-default.test.ts
+/job_site/text_reply_demo_checklist.txt
+required_log_entries:
+text reply-by-default path implemented
+checkpoint:
+checkpoint_id: S2-CHECK
+pass_condition: Two-way text works end-to-end, replies by default, and is visible in the UI across repeated messages.
+patch_condition: Text still only acknowledges receipt, reply generation is inconsistent, or UI does not reflect the full exchange.
+handoff:
+on_pass:
+next_stage: S3
+next_owner: "Foreman A the Blueprint Foreman"
+on_patch:
+return_stage: S2
+return_owner: "Foreman A the Blueprint Foreman"
+on_error:
+return_to: Factory Control Interface
+stage_id: S3
+stage_name: Voice golden path
+owner: "Foreman A the Blueprint Foreman"
+goal: Complete one stable voice-note flow from Telegram into the assistant pipeline and back out to the user.
+inputs:
+current Telegram voice intake code
+current transcription provider path
+current shared text pipeline
+worker_orders:
+worker_a:
+assigned: yes
+task: Complete the voice-note flow so a Telegram voice note is fetched, transcribed, routed through the shared assistant pipeline, and returns either a stable text reply or a spoken reply if already reliable enough.
+expected_artifacts:
+/worker-wb/src/integrations/telegram/voice.ts
+/worker-wb/src/providers/transcription/provider.ts
+/worker-wb/src/providers/transcription/index.ts
+/worker-wb/src/integrations/telegram/outbound.ts
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+/job_site/reference_repo_matrix.txt
+repo_mirror_required: yes
+commit_required: yes
+push_required: yes
+worker_b:
+assigned: yes
+task: Add tests and fallback handling for media fetch failure, transcription failure, unsupported media, and reply fallback mode. Record the exact demo proof steps for one live voice round trip.
+expected_artifacts:
+/worker-wb/test/telegram-voice-roundtrip.test.ts
+/job_site/voice_demo_checklist.txt
+/job_site/voice_failure_modes.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: yes
+commit_required: yes
+push_required: yes
+required_stage_artifacts:
+/worker-wb/test/telegram-voice-roundtrip.test.ts
+/job_site/voice_demo_checklist.txt
+/job_site/voice_failure_modes.txt
+required_log_entries:
+voice golden path implemented
+checkpoint:
+checkpoint_id: S3-CHECK
+pass_condition: One Telegram voice note enters, is transcribed, reaches the assistant pipeline, and returns a stable reply path with readable UI status.
+patch_condition: Voice flow breaks at fetch, transcription, routing, reply, or UI visibility.
+handoff:
+on_pass:
+next_stage: S4
+next_owner: "Foreman A the Blueprint Foreman"
+on_patch:
+return_stage: S3
+return_owner: "Foreman A the Blueprint Foreman"
+on_error:
+return_to: Factory Control Interface
+stage_id: S4
+stage_name: Single calendar action
+owner: "Foreman A the Blueprint Foreman"
+goal: Add one reliable calendar action and no more.
+inputs:
+current assistant pipeline
+chosen calendar provider config
+approved calendar reference repos
+worker_orders:
+worker_a:
+assigned: yes
+task: Implement exactly one calendar action boundary. Preferred target is read next event or list today's schedule. Expose a simple internal action contract and runtime status route.
+expected_artifacts:
+/worker-wb/src/integrations/calendar/index.ts
+/worker-wb/src/integrations/calendar/provider.ts
+/worker-wb/src/routes/calendar-status.ts
+/worker-wb/src/lib/action-router.ts
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+/job_site/reference_repo_matrix.txt
+repo_mirror_required: yes
+commit_required: yes
+push_required: yes
+worker_b:
+assigned: yes
+task: Add tests and operator proof steps for one successful calendar command and one safe failure case when provider config or permissions are missing.
+expected_artifacts:
+/worker-wb/test/calendar-single-action.test.ts
+/job_site/calendar_demo_checklist.txt
+/job_site/calendar_failure_modes.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: yes
+commit_required: yes
+push_required: yes
+required_stage_artifacts:
+/worker-wb/test/calendar-single-action.test.ts
+/job_site/calendar_demo_checklist.txt
+/job_site/calendar_failure_modes.txt
+/worker-wb/src/routes/calendar-status.ts
+required_log_entries:
+single calendar action implemented
+checkpoint:
+checkpoint_id: S4-CHECK
+pass_condition: One simple calendar command executes reliably or fails cleanly with readable status in the UI and runtime.
+patch_condition: Scope expands beyond one action, provider config is ambiguous, or failure handling is unreadable.
+handoff:
+on_pass:
+next_stage: S5
+next_owner: "Foreman A the Blueprint Foreman"
+on_patch:
+return_stage: S4
+return_owner: "Foreman A the Blueprint Foreman"
+on_error:
+return_to: Factory Control Interface
+stage_id: S5
+stage_name: UI status and event clarity
+owner: "Foreman A the Blueprint Foreman"
+goal: Make the UI clearly show processing state for text, voice, and calendar actions without redesigning the shell.
+inputs:
+current operator shell
+session/latest route
+calendar/status route
+live event trail
+worker_orders:
+worker_a:
+assigned: yes
+task: Extend the session/status surface so the UI can show received, transcribed, processing, action-called, replied, and failed states.
+expected_artifacts:
+/worker-wb/src/routes/session-latest.ts
+/job_site/ui_state_contract.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: yes
+commit_required: yes
+push_required: yes
+worker_b:
+assigned: yes
+task: Update the operator UI to render the expanded states, timestamps, and action results clearly without redesigning layout.
+expected_artifacts:
+/apps/operator-shell/src/*
+/job_site/ui_stage3_demo_checklist.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+/job_site/ui_state_contract.txt
+repo_mirror_required: yes
+commit_required: yes
+push_required: yes
+required_stage_artifacts:
+/job_site/ui_state_contract.txt
+/job_site/ui_stage3_demo_checklist.txt
+required_log_entries:
+ui status clarity implemented
+checkpoint:
+checkpoint_id: S5-CHECK
+pass_condition: UI clearly shows the full state trail for text, voice, and calendar action execution.
+patch_condition: UI hides processing state, unclear failures remain, or layout changes exceed scope.
+handoff:
+on_pass:
+next_stage: S6
+next_owner: "Foreman A the Blueprint Foreman"
+on_patch:
+return_stage: S5
+return_owner: "Foreman A the Blueprint Foreman"
+on_error:
+return_to: Factory Control Interface
+stage_id: S6
+stage_name: Demo proof pack
+owner: "Foreman A the Blueprint Foreman"
+goal: Produce one clean proof pack for the live Stage 3 demo.
+inputs:
+text path
+voice path
+calendar path
+UI state path
+worker_orders:
+worker_a:
+assigned: yes
+task: Produce one operator runbook covering two-way text, one voice round trip, one calendar command, and required screenshots or runtime captures.
+expected_artifacts:
+/job_site/demo_runbook.txt
+/job_site/demo_evidence_requirements.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+worker_b:
+assigned: yes
+task: Produce a config and readiness matrix for Telegram, transcription, and calendar provider requirements, including safe fallback modes.
+expected_artifacts:
+/job_site/demo_env_matrix.txt
+/job_site/readiness_matrix.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+required_stage_artifacts:
+/job_site/demo_runbook.txt
+/job_site/demo_evidence_requirements.txt
+/job_site/demo_env_matrix.txt
+/job_site/readiness_matrix.txt
+required_log_entries:
+demo proof pack created
+checkpoint:
+checkpoint_id: S6-CHECK
+pass_condition: Operator can run the demo without hidden setup knowledge and knows the required proof for each path.
+patch_condition: Demo still depends on tribal knowledge or missing config assumptions.
+handoff:
+on_pass:
+next_stage: CF-TEST
+next_owner: "Foreman A the Blueprint Foreman"
+on_patch:
+return_stage: S6
+return_owner: "Foreman A the Blueprint Foreman"
+on_error:
+return_to: Factory Control Interface
+stage_id: CF-TEST
+stage_name: Cloudflare Deploy Test
+owner: "Foreman A the Blueprint Foreman"
+goal: Prompt operator to perform a real Stage 3 deploy and live route check.
+inputs:
+current pushed branch and commit evidence
+/job_site/cloudflare_prep_report.txt
+/job_site/demo_runbook.txt
+worker_orders:
+worker_a:
+assigned: yes
+task: Prepare the exact operator prompt to deploy now on Cloudflare using the declared root path and deploy command, then record evidence references for live routes and demo paths.
+expected_artifacts:
+/job_site/cloudflare_operator_prompt.txt
+/job_site/cloudflare_test_evidence_index.txt
+required_references:
+/job_site/factory-manual-v1.1.txt
+/job_site/worker-execution-manual-v1.1.txt
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+worker_b:
+assigned: no
+task:
+expected_artifacts: []
+required_references:
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+required_stage_artifacts:
+deployed_route
+healthcheck_response_or_equivalent
+screenshot_of_live_route
+/job_site/cloudflare_operator_prompt.txt
+/job_site/cloudflare_test_evidence_index.txt
+required_log_entries:
+operator prompted to test cloudflare deploy now
+checkpoint:
+checkpoint_id: CF-TEST-CHECK
+pass_condition: Operator has been explicitly prompted to deploy now using the declared root path and deploy command, and evidence exists for live route, /health, /telegram/webhook, /session/latest, /calendar/status, and UI behavior.
+patch_condition: Deploy failed, wrong root directory, route inaccessible, Access blocks required public path, or asset path mismatches live behavior.
+handoff:
+on_pass:
+next_stage: CF-VERIFY
+next_owner: "Foreman B the Systems Foreman"
+on_patch:
+return_stage: CF-TEST
+return_owner: "Foreman A the Blueprint Foreman"
+on_error:
+return_to: Factory Control Interface
+stage_id: CF-VERIFY
+stage_name: Cloudflare Checksum Validation
+owner: "Foreman B the Systems Foreman"
+goal: Validate live Stage 3 deploy evidence before closeout.
+inputs:
+/job_site/cloudflare_test_evidence_index.txt
+live route screenshots
+runtime response screenshots
+operator evidence from demo runbook execution
+worker_orders:
+worker_a:
+assigned: no
+task:
+expected_artifacts: []
+required_references:
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+worker_b:
+assigned: no
+task:
+expected_artifacts: []
+required_references:
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+required_stage_artifacts:
+/job_site/cloudflare_checksum_result.txt
+required_log_entries:
+cloudflare checksum complete
+checkpoint:
+checkpoint_id: CF-VERIFY-CHECK
+pass_condition: Live deploy matches declared target, required routes respond, UI route responds if in scope, and Access behavior matches declared expectation.
+patch_condition: Missing evidence, wrong deployed target, runtime mismatch, UI mismatch, or access mismatch.
+handoff:
+on_pass:
+next_stage: S7
+next_owner: "Foreman B the Systems Foreman"
+on_patch:
+return_stage: CF-TEST
+return_owner: "Foreman A the Blueprint Foreman"
+on_error:
+return_to: Factory Control Interface
+stage_id: S7
+stage_name: Final checksum and closeout
+owner: "Foreman B the Systems Foreman"
+goal: Validate that the Stage 3 demo is complete within declared scope.
+inputs:
+all stage artifacts
+live deploy evidence
+repo mirror, commit, and push evidence
+worker_orders:
+worker_a:
+assigned: no
+task:
+expected_artifacts: []
+required_references:
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+worker_b:
+assigned: no
+task:
+expected_artifacts: []
+required_references:
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+required_stage_artifacts:
+/job_site/final_checksum.txt
+required_log_entries:
+final checksum complete
+checkpoint:
+checkpoint_id: S7-CHECK
+pass_condition: Two-way text works, one voice round trip works or falls back cleanly as declared, one calendar action works or fails cleanly as declared, UI clearly reflects the event trail, and proof artifacts exist for all three paths.
+patch_condition: Any declared path lacks code artifact, test evidence, live proof, or readable failure handling.
+handoff:
+on_pass:
+next_stage: S8
+next_owner: Factory Control Interface
+on_patch:
+return_stage: S2
+return_owner: "Foreman A the Blueprint Foreman"
+on_error:
+return_to: Factory Control Interface
+stage_id: S8
+stage_name: TPS closeout
+owner: Factory Control Interface
+goal: Perform final validation and generate Stage 3 TPS report.
+inputs:
+/job_site/stage_activity_log.txt
+/job_site/final_checksum.txt
+/job_site/cloudflare_checksum_result.txt
+all required stage artifacts
+worker_orders:
+worker_a:
+assigned: no
+task:
+expected_artifacts: []
+required_references:
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+worker_b:
+assigned: no
+task:
+expected_artifacts: []
+required_references:
+/job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+repo_mirror_required: no
+commit_required: no
+push_required: no
+required_stage_artifacts:
+/job_site/TPS_REPORT.txt
+required_log_entries:
+TPS report written
+checkpoint:
+checkpoint_id: S8-CHECK
+pass_condition: TPS report exists and summarizes Stage 3 outcome, patch history, proof artifacts, and residual demo risks without scope drift.
+patch_condition: TPS report missing or incomplete.
+handoff:
+on_pass:
+next_stage: complete
+next_owner: Factory Control Interface
+on_patch:
+return_stage: S8
+return_owner: Factory Control Interface
+on_error:
+return_to: Factory Control Interface
+
+final_validation:
+required_inputs:
+- /job_site/stage3_scope_lock.txt
+- /job_site/reference_repo_matrix.txt
+- /job_site/stage_activity_log.txt
+- /job_site/final_checksum.txt
+- /job_site/cloudflare_checksum_result.txt
+validation_checks:
+- verify Stage 3 scope remained voice loop, one calendar action, and reply-path polish only
+- verify approved reference repos were used only as reference material and adapted into local structure
+- verify two-way Telegram text works by default
+- verify one Telegram voice note reaches the assistant pipeline and returns a stable reply path
+- verify one simple calendar command works or fails cleanly as declared
+- verify operator UI visibly renders the event trail and statuses
+- verify demo proof pack exists
+- verify every file-writing stage reports repo mirror, commit, and push evidence where required
+- verify cloudflare_deployment_plan block exists
+- verify operator was explicitly prompted to test real Cloudflare deploy
+- verify Cloudflare deploy evidence exists before closeout
+outputs:
+- completion_status
+- /job_site/TPS_REPORT.txt
+
+completion:
+success_condition:
+- all declared stages completed
+- all required artifacts present
+- /job_site/stage_activity_log.txt present
+- /job_site/TPS_REPORT.txt present
+- two-way text proven
+- one voice round trip proven
+- one calendar action proven
+- operator UI visibly demonstrates the full loop
+- Cloudflare deploy validation passed
+closeout_owner: Factory Control Interface
