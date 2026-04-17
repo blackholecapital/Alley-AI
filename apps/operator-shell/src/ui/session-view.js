@@ -1,24 +1,20 @@
 /**
  * session-view.js — Operator shell session renderer.
- * Ref: build-sheet-EXEC-AI-STAGE2-003 S3 (Worker B).
+ * Ref: build-sheet-EXEC-AI-STAGE3-004 S5 (Worker B).
  *
- * Responsibilities (per build-sheet task):
- *   - fetch /session/latest and render inbound (transcript) + outbound
- *     (assistant) events into the existing shell
- *   - reflect live / loading / empty / error states explicitly
- *   - render a visible last-event marker
- *   - never redesign the shell (DOM hooks are reused unchanged)
+ * S5 additions: calendar status polling, voice kind badges,
+ * calendar action result bar (#calendar-action-bar).
  *
- * Plain browser ESM — no build step, no dependency.
- * Contract consumed: see ./session.contract.ts.
- *
- * DOM hooks used (present in index.html and in worker-wb/public/index.html):
- *   #transcript-log       — inbound event list
- *   #response-log         — outbound event list
- *   #status-core          — live/loading/error pill text
- *   #status-session       — session id (short)
- *   #last-event-marker    — "last event Xs ago" badge
- *   #status-state         — current UIRenderState.kind text
+ * DOM hooks used:
+ *   #transcript-log         — inbound event list
+ *   #response-log           — outbound event list
+ *   #status-core            — live/loading/error pill text
+ *   #status-session         — session id (short)
+ *   #last-event-marker      — "last event Xs ago" badge
+ *   #status-state           — current UIRenderState.kind text
+ *   #status-calendar        — calendar provider readiness (S5)
+ *   #calendar-action-bar    — strip shown when last invocation present (S5)
+ *   #calendar-action-result — last action result text (S5)
  */
 
 'use strict';
@@ -29,6 +25,7 @@
 // routes live on the same worker origin and return {"ok": true} on success
 // for the POST path.
 const ENDPOINT = '/session/latest';
+const CALENDAR_ENDPOINT = '/calendar/status';
 const SEND_ENDPOINT = '/telegram/webhook';
 const POLL_MS = 5000;
 
@@ -39,6 +36,10 @@ const DOM = {
   session: () => document.getElementById('status-session'),
   marker: () => document.getElementById('last-event-marker'),
   state: () => document.getElementById('status-state'),
+  // S5: calendar surface
+  calendarStatus: () => document.getElementById('status-calendar'),
+  calendarBar: () => document.getElementById('calendar-action-bar'),
+  calendarResult: () => document.getElementById('calendar-action-result'),
 };
 
 let pollTimer = null;
@@ -73,15 +74,24 @@ function makeEntry(evt) {
   wrap.className = `entry entry-${evt.direction}`;
   wrap.dataset.eventId = evt.id;
 
+  // S5: voice / non-text kind badge
+  if (evt.kind && evt.kind !== 'text') {
+    const badge = document.createElement('div');
+    badge.className = 'entry-kind-badge';
+    badge.textContent = evt.kind === 'voice' ? '\uD83C\uDF99 voice' : `\u2022 ${evt.kind}`;
+    wrap.appendChild(badge);
+  }
+
   const body = document.createElement('div');
   body.className = 'entry-body';
-  body.textContent = evt.text ?? `[${evt.kind}]`;
+  body.textContent = evt.text
+    ?? (evt.kind === 'voice' ? '[voice note \u2014 transcription pending]' : `[${evt.kind}]`);
   wrap.appendChild(body);
 
   const meta = document.createElement('div');
   meta.className = 'entry-meta';
   const who = evt.username ? `@${evt.username}` : evt.source;
-  const when = formatTime(evt.received_at);
+  const when = formatTime(evt.received_at ?? evt.at);
   meta.textContent = `${who} · ${when}`;
   wrap.appendChild(meta);
 
@@ -228,25 +238,85 @@ async function fetchOnce() {
       return;
     }
     const data = await res.json();
-    if (!data || !Array.isArray(data.events)) {
+    // Support both legacy {events:[]} and current {items:[]} shape.
+    const evts = Array.isArray(data.events)
+      ? data.events
+      : Array.isArray(data.items) ? data.items.slice().reverse() : null;
+    if (!evts) {
       renderError('malformed response');
       return;
     }
-    if (data.events.length === 0) {
-      renderEmpty(data.session_id ?? null);
+    const sessionId = data.session_id ?? (data.session && data.session.session_id) ?? null;
+    const lastAt = data.last_event_at ?? (data.session && data.session.last_event_at) ?? null;
+    if (evts.length === 0) {
+      renderEmpty(sessionId);
       return;
     }
-    renderLive(data);
+    renderLive({ ...data, events: evts, session_id: sessionId, last_event_at: lastAt });
   } catch (err) {
     renderError(err && err.message ? err.message : 'network');
+  }
+}
+
+// S5: poll /calendar/status and render calendar action bar.
+function renderCalendar(data) {
+  const statusEl = DOM.calendarStatus();
+  const barEl = DOM.calendarBar();
+  const resultEl = DOM.calendarResult();
+
+  if (!data || !data.provider) {
+    setText(statusEl, '—');
+    if (barEl) barEl.classList.add('hidden');
+    return;
+  }
+
+  const providerReady = data.provider && data.provider.ready;
+  const providerName = (data.provider && data.provider.provider) || '—';
+  setText(statusEl, providerReady ? `${providerName} ready` : `${providerName} not ready`);
+  if (statusEl) statusEl.dataset.state = providerReady ? 'live' : 'error';
+
+  const inv = data.invocation;
+  if (!inv) {
+    if (barEl) barEl.classList.add('hidden');
+    return;
+  }
+
+  if (barEl) barEl.classList.remove('hidden');
+  if (!resultEl) return;
+
+  if (inv.ok) {
+    const count = inv.payload && inv.payload.event_count != null
+      ? ` · ${inv.payload.event_count} event${inv.payload.event_count === 1 ? '' : 's'}`
+      : '';
+    resultEl.textContent = `\u2713 calendar.list_today ok${count} · ${formatTime(inv.handled_at)}`;
+    resultEl.dataset.state = 'ok';
+  } else {
+    const code = (inv.error && inv.error.code) || 'error';
+    resultEl.textContent = `\u2717 calendar.list_today failed (${code}) · ${formatTime(inv.handled_at)}`;
+    resultEl.dataset.state = 'fail';
+  }
+}
+
+async function fetchCalendar() {
+  try {
+    const res = await fetch(CALENDAR_ENDPOINT, { cache: 'no-store' });
+    if (!res.ok) {
+      setText(DOM.calendarStatus(), '—');
+      return;
+    }
+    const data = await res.json();
+    renderCalendar(data);
+  } catch (_) {
+    setText(DOM.calendarStatus(), '—');
   }
 }
 
 function startPolling() {
   renderLoading();
   void fetchOnce();
+  void fetchCalendar();
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(fetchOnce, POLL_MS);
+  pollTimer = setInterval(() => { void fetchOnce(); void fetchCalendar(); }, POLL_MS);
   if (markerTimer) clearInterval(markerTimer);
   markerTimer = setInterval(renderMarker, 1000);
 }
@@ -294,15 +364,18 @@ if (typeof window !== 'undefined') {
 // Test hooks — exported for unit harnesses; no runtime consumers.
 export {
   ENDPOINT,
+  CALENDAR_ENDPOINT,
   SEND_ENDPOINT,
   POLL_MS,
   fetchOnce,
+  fetchCalendar,
   sendMessage,
   startPolling,
   stopPolling,
   renderLoading,
   renderEmpty,
   renderLive,
+  renderCalendar,
   renderError,
   formatAgo,
   formatTime,

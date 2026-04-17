@@ -303,3 +303,32 @@ html, body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ── S5: Calendar action bar ────────────────────────────────────────── */
+.calendar-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--surface-2, #1a1d23);
+  border-bottom: 1px solid var(--border, #2a2d34);
+  font-size: 12px;
+}
+.calendar-action-bar.hidden { display: none; }
+.calendar-action-label { color: var(--text-dim, #6b6f78); }
+.calendar-action-result { color: var(--text-secondary, #a5a9b3); font-family: ui-monospace, monospace; }
+.calendar-action-result[data-state="ok"]   { color: #7cdc7c; }
+.calendar-action-result[data-state="fail"] { color: #ff6b6b; }
+
+/* S5: status-value calendar state colours */
+#status-calendar[data-state="live"]  { color: #7cdc7c; }
+#status-calendar[data-state="error"] { color: #ff6b6b; }
+
+/* ── S5: Voice / kind badge in transcript entries ───────────────────── */
+.entry-kind-badge {
+  font-size: 10px;
+  color: var(--text-dim, #6b6f78);
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}

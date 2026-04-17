@@ -1,0 +1,225 @@
+UI STAGE 3 DEMO CHECKLIST — EXEC-AI-STAGE3-004 | S5 | WORKER B
+===============================================================
+Generated: 2026-04-17
+Branch:    claude/calendar-single-action-tests-o8NmW
+Artifacts: /apps/operator-shell/src/*
+           /job_site/ui_stage3_demo_checklist.txt
+Scope:     Operator proof steps for the S5 UI changes that surface
+           processing states for text, voice, and calendar actions
+           without redesigning the shell.
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/worker-execution-manual-v1.1.txt
+- /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+- /job_site/ui_state_contract.txt
+- /job_site/calendar_demo_checklist.txt
+- /worker-wb/public/js/app.js
+- /worker-wb/public/index.html
+- /worker-wb/public/css/style.css
+- /apps/operator-shell/src/ui/session-view.js
+- /apps/operator-shell/src/ui/index.html
+
+NOTE: /job_site/factory-manual-v1.1.txt is on disk as
+      /job_site/factory-manual-v1.11.txt (v1.11 lean). Same active
+      manual per PRECEDENCE LAW; flag only.
+
+----------------------------------------------------------
+1. STAGE 3 S5 CONTRACT
+----------------------------------------------------------
+S5 goal: "Make the UI clearly show processing state for text, voice,
+and calendar actions without redesigning the shell."
+
+Pinned by this checklist:
+
+  U1. Status bar shows Calendar provider readiness.
+      #status-calendar displays "demo ready" (green) when
+      CALENDAR_PROVIDER=demo, "not ready" (red) otherwise.
+      Element updates on every poll cycle without page reload.
+
+  U2. Voice events are clearly labelled in the transcript pane.
+      Inbound items with kind="voice" render a "🎙 VOICE" badge
+      above the body text. When text is null (pre-transcription),
+      the body shows "[voice note — transcription pending]" rather
+      than a raw "[voice]" token.
+
+  U3. Calendar action result bar appears after the first ?run invocation.
+      #calendar-action-bar is hidden by default and reveals itself
+      when /calendar/status returns a non-null invocation block.
+      Bar shows: "✓ calendar.list_today ok · N events · HH:MM:SS"
+      (green) on success, or "✗ calendar.list_today failed (code) ·
+      HH:MM:SS" (red) on failure.
+
+  U4. Bar reflects current invocation on every poll — no stale state.
+      Polling the status route every 5 s keeps the bar live without
+      page reload.
+
+  U5. Layout is not redesigned.
+      The two existing transcript / response panes are unchanged.
+      The calendar action bar is an additive strip between the status
+      bar and the main panels; it does not alter the pane grid.
+
+----------------------------------------------------------
+2. CHANGED FILES (S5 Worker B)
+----------------------------------------------------------
+- worker-wb/public/js/app.js       — calendar polling, voice badge,
+                                     renderCalendar()
+- worker-wb/public/index.html      — #status-calendar, #calendar-action-bar
+- worker-wb/public/css/style.css   — S5 CSS rules (calendar bar, kind badge)
+- apps/operator-shell/src/ui/session-view.js — synced session-view
+- apps/operator-shell/src/ui/index.html      — synced DOM hooks + CSS
+
+----------------------------------------------------------
+3. PRE-FLIGHT (operator)
+----------------------------------------------------------
+  [ ] Worker deployed from /worker-wb (cd worker-wb && npm run deploy).
+  [ ] CALENDAR_PROVIDER secret set to "demo" for happy-path demo.
+      (wrangler secret put CALENDAR_PROVIDER → value: demo)
+  [ ] /health, /session/latest, /calendar/status all return HTTP 200.
+      Verify:
+        curl -I https://<worker>.workers.dev/health
+        curl -I https://<worker>.workers.dev/session/latest
+        curl -I https://<worker>.workers.dev/calendar/status
+      All must return 200 (not 302 to Access login).
+  [ ] Operator UI open at the Worker root ("/").
+
+----------------------------------------------------------
+4. PROOF STEPS — CALENDAR STATUS IN HEADER (U1)
+----------------------------------------------------------
+Step 1 — open the operator UI
+  Navigate to https://<worker>.workers.dev/
+
+  Expect after first poll (≤5 s):
+    Status bar shows: … | Calendar: demo ready
+    "demo ready" is rendered in green (#7cdc7c).
+
+Step 2 — unset CALENDAR_PROVIDER and reload
+  wrangler secret delete CALENDAR_PROVIDER
+  Reload the operator UI.
+
+  Expect after first poll:
+    Calendar: unconfigured not ready
+    Text is rendered in red (#ff6b6b).
+
+  Restore: wrangler secret put CALENDAR_PROVIDER → demo.
+
+Evidence capture:
+  [ ] Screenshot of status bar showing "Calendar: demo ready" (green).
+  [ ] Screenshot showing red "not ready" after provider removed.
+
+----------------------------------------------------------
+5. PROOF STEPS — VOICE EVENT RENDERING (U2)
+----------------------------------------------------------
+Step 1 — send a voice note via Telegram
+  Use the Telegram bot to send a voice message to the bot.
+
+  Expect in the Transcript (inbound) pane:
+    A card with a "🎙 VOICE" badge at the top.
+    Body text either shows the transcription (if Whisper resolved)
+    or "[voice note — transcription pending]" while processing.
+    Meta row shows "@username · HH:MM:SS".
+
+Step 2 — compare with a text message entry
+  Send a text message from Telegram.
+
+  Expect:
+    Text card has NO kind badge (clean body text only).
+    Both text and voice cards are visually distinguishable at a glance.
+
+Evidence capture:
+  [ ] Screenshot of transcript pane with at least one voice card
+      (badge visible) and one text card (no badge).
+
+----------------------------------------------------------
+6. PROOF STEPS — CALENDAR ACTION RESULT BAR (U3 / U4)
+----------------------------------------------------------
+Step 1 — confirm bar is hidden before first ?run
+  curl -s "https://<worker>.workers.dev/calendar/status" | jq '.invocation'
+
+  Expect: null
+
+  In the operator UI (after poll):
+    #calendar-action-bar must not be visible (display: none).
+
+Step 2 — trigger the action via ?run=1
+  curl -s "https://<worker>.workers.dev/calendar/status?run=1" \
+    | jq '{ok: .invocation.ok, event_count: .invocation.payload.event_count}'
+
+  Expect: { "ok": true, "event_count": 3 }
+
+  In the operator UI (after next poll ≤5 s):
+    Calendar action bar appears below the status bar.
+    Bar reads: ✓ calendar.list_today ok · 3 events · HH:MM:SS
+    Text is rendered in green.
+
+Step 3 — trigger the failure path
+  wrangler secret delete CALENDAR_PROVIDER
+  curl -s "https://<worker>.workers.dev/calendar/status?run=1" \
+    | jq '{ok: .invocation.ok, code: .invocation.error.code}'
+
+  Expect: { "ok": false, "code": "provider_not_ready" }
+
+  In the operator UI (after next poll):
+    Bar reads: ✗ calendar.list_today failed (provider_not_ready) · HH:MM:SS
+    Text is rendered in red.
+
+  Restore: wrangler secret put CALENDAR_PROVIDER → demo.
+
+Evidence capture:
+  [ ] Screenshot of UI with bar hidden (no invocation).
+  [ ] Screenshot of UI with bar showing green ✓ result.
+  [ ] Screenshot of UI with bar showing red ✗ result.
+
+----------------------------------------------------------
+7. ACCEPTANCE GATES (for S5 checkpoint)
+----------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] #status-calendar updates on every poll with correct provider state.
+  [ ] "demo ready" is green; "not ready" is red. No layout shift.
+  [ ] Voice events show a distinct badge; text events do not.
+  [ ] Voice body is "[voice note — transcription pending]" when text null.
+  [ ] #calendar-action-bar is hidden when invocation=null.
+  [ ] Bar appears and shows ok/fail result after ?run=1 invocation.
+  [ ] Bar updates within one poll cycle (≤5 s) without page reload.
+  [ ] The transcript / response pane grid is unchanged.
+  [ ] Repo committed and pushed to designated branch.
+
+PATCH conditions (any one fails):
+  [ ] #status-calendar never appears or stays at "—" when provider is ready.
+  [ ] Voice events render identically to text events (no badge).
+  [ ] #calendar-action-bar never appears after a ?run=1 invocation.
+  [ ] Bar shows a stale result and does not update on next poll.
+  [ ] Layout is redesigned (panels removed, reordered, or reflowed).
+  [ ] CSS added to existing shared selectors that changes text/response pane styling.
+
+----------------------------------------------------------
+8. ARTIFACT SELF-CHECK
+----------------------------------------------------------
+expected_artifact_1: /apps/operator-shell/src/ui/session-view.js — present
+expected_artifact_2: /apps/operator-shell/src/ui/index.html       — present
+expected_artifact_3: /worker-wb/public/js/app.js                  — present
+expected_artifact_4: /worker-wb/public/index.html                 — present
+expected_artifact_5: /worker-wb/public/css/style.css              — present
+expected_artifact_6: /job_site/ui_stage3_demo_checklist.txt       — present (this file)
+repo_mirror_required: yes
+commit_required:      yes — to be committed on designated branch
+push_required:        yes — to be pushed to origin
+
+----------------------------------------------------------
+9. ISSUES / FLAGS
+----------------------------------------------------------
+- Build sheet cites /job_site/factory-manual-v1.1.txt; file on disk is
+  /job_site/factory-manual-v1.11.txt (v1.11 lean). Flag only per
+  PRECEDENCE LAW.
+- Worker A S5 task (extend session/status processing states per-event)
+  does not appear to have landed separately; current session-latest
+  route returns the Stage 2 item shape. Worker B S5 UI changes are
+  backward-compatible: voice rendering uses the existing kind="voice"
+  field; calendar bar uses /calendar/status not session-latest. No
+  breakage when Worker A S5 lands and adds additional per-event state
+  fields.
+- The ?run=1 trigger in Step 2 is a manual proof step only. The
+  production UI does NOT dispatch ?run=1 autonomously — it only reads
+  provider readiness. The invocation block displayed in the bar reflects
+  the last ?run=1 result stored by the route, not a UI-triggered call.
