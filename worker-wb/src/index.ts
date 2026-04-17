@@ -3,6 +3,7 @@ import { handleSessionLatest } from './routes/session-latest';
 import { handleHealth } from './routes/health';
 import { handleUiSend } from './routes/ui-send';
 import { handleCalendarStatus } from './routes/calendar-status';
+import { handleVoiceCapture } from './integrations/telegram/voice';
 import type { TelegramEnv } from './integrations/telegram/types';
 import type { TranscriptionEnv } from './providers/transcription/provider';
 import type { CalendarEnv } from './integrations/calendar/provider';
@@ -39,6 +40,8 @@ export default {
         response = await handleCalendarStatus(request, env, logger);
       } else if (url.pathname === '/ui/send') {
         response = await handleUiSend(request, logger);
+      } else if (url.pathname === '/voice/capture') {
+        response = await handleVoiceCapture(request, env, logger);
       } else {
         response = new Response(null, { status: 404 });
       }
