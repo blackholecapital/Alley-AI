@@ -2,11 +2,13 @@ import { handleTelegramWebhook } from './routes/telegram-webhook';
 import { handleSessionLatest } from './routes/session-latest';
 import { handleHealth } from './routes/health';
 import { handleUiSend } from './routes/ui-send';
+import { handleCalendarStatus } from './routes/calendar-status';
 import type { TelegramEnv } from './integrations/telegram/types';
 import type { TranscriptionEnv } from './providers/transcription/provider';
+import type { CalendarEnv } from './integrations/calendar/provider';
 import { createLogger, extractCorrelationId } from './lib/logging';
 
-interface Env extends TelegramEnv, TranscriptionEnv {
+interface Env extends TelegramEnv, TranscriptionEnv, CalendarEnv {
   ENVIRONMENT?: string;
   WORKER_VERSION?: string;
   LOG_LEVEL?: string;
@@ -33,6 +35,8 @@ export default {
         response = handleSessionLatest(request, logger);
       } else if (url.pathname === '/health') {
         response = handleHealth(request, logger);
+      } else if (url.pathname === '/calendar/status') {
+        response = await handleCalendarStatus(request, env, logger);
       } else if (url.pathname === '/ui/send') {
         response = await handleUiSend(request, logger);
       } else {
