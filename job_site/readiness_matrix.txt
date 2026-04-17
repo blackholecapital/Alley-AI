@@ -1,0 +1,247 @@
+READINESS MATRIX — EXEC-AI-STAGE3-004 | S6 | WORKER B
+======================================================
+Generated: 2026-04-17
+Branch:    claude/calendar-single-action-tests-o8NmW
+Scope:     Per-path readiness states, safe fallback modes, and operator
+           proof requirements for the Stage 3 demo (text, voice, calendar).
+           One row per runtime path. Each path specifies its ready state,
+           degraded state, and safe-failure behaviour.
+
+References consulted:
+  /job_site/factory-manual-v1.11.txt
+  /job_site/worker-execution-manual-v1.1.txt
+  /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+  /job_site/demo_env_matrix.txt
+  /job_site/calendar_failure_modes.txt
+  /job_site/voice_failure_modes.txt
+  /worker-wb/src/lib/env.ts
+  /worker-wb/src/integrations/calendar/provider.ts
+  /worker-wb/src/routes/calendar-status.ts
+
+NOTE: /job_site/factory-manual-v1.1.txt is on disk as
+      /job_site/factory-manual-v1.11.txt. Same active manual per
+      PRECEDENCE LAW; flag only.
+
+----------------------------------------------------------
+SAFETY INVARIANTS (apply to all paths)
+----------------------------------------------------------
+I-1  Every route returns HTTP 200 on any provider state.
+     A non-200 from an operational route is a PATCH condition.
+
+I-2  No route handler throws an uncaught exception.
+     All provider failures are caught and returned as structured
+     JSON (ok:false, error.code from a closed enum).
+
+I-3  Every failure result includes a human-readable reply_text.
+     Users are never shown raw stack traces or empty responses.
+
+I-4  All routes with no required env still return a valid response
+     when those env keys are missing. Degraded ≠ broken.
+
+----------------------------------------------------------
+PATH 1: TELEGRAM TEXT ROUND TRIP
+----------------------------------------------------------
+Route:      POST /telegram/webhook
+Test:       send a text message to the Telegram bot
+
+READY STATE
+  condition:  TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET both set
+  behaviour:  inbound text received → session-store item recorded →
+              assistant reply sent via Telegram sendMessage →
+              outbound item recorded → /session/latest shows both items
+  proof:      @username says "hello" → bot replies → UI shows both
+
+DEGRADED STATE (missing secrets)
+  condition:  TELEGRAM_BOT_TOKEN or TELEGRAM_WEBHOOK_SECRET missing
+  behaviour:  webhook returns 500 config_error JSON with explicit key name
+  HTTP status: 500 (not a safe path — secrets are required for any demo)
+  operator action: run wrangler secret put and redeploy
+
+SAFE FALLBACK
+  The text path has no safe fallback for missing Telegram secrets.
+  It is the baseline requirement for any Telegram interaction.
+  Without these secrets the demo cannot proceed for text OR voice.
+
+PROOF REQUIRED (operator)
+  [ ] curl POST to /telegram/webhook with a test update returns 200 ok
+  [ ] /session/latest shows an inbound + outbound pair
+  [ ] Operator UI transcript pane shows the exchange
+
+----------------------------------------------------------
+PATH 2: TELEGRAM VOICE ROUND TRIP
+----------------------------------------------------------
+Route:      POST /telegram/webhook (voice_note update type)
+Test:       send a voice message to the Telegram bot
+
+READY STATE
+  condition:  TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET +
+              DEEPGRAM_API_KEY (with TRANSCRIPTION_PROVIDER=deepgram
+              or left unset — auto-detected when key is present)
+  behaviour:  voice note received → media downloaded → Deepgram
+              transcription → text reply sent → UI shows voice inbound
+              (🎙 VOICE badge) + text outbound
+  proof:      send 5s voice note → bot replies with transcription text
+
+DEGRADED STATE — no transcription key
+  condition:  TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET set;
+              DEEPGRAM_API_KEY unset or TRANSCRIPTION_PROVIDER=noop
+  behaviour:  voice note received → inbound item recorded (kind=voice,
+              text=null) → handler returns readable failure reply
+              ("I heard your voice note but transcription is not
+              configured") → outbound item recorded with error text
+  HTTP status: 200 (webhook still ACKs; Telegram does not retry)
+  UI:         transcript shows voice badge with "[voice note —
+              transcription pending]"; response pane shows error text
+  operator action: this is a DEMO-SAFE fallback — show it intentionally
+              to prove the voice path is wired without needing an API key
+
+SAFE FALLBACK MODE (noop provider)
+  Sets TRANSCRIPTION_PROVIDER=noop or leaves DEEPGRAM_API_KEY unset.
+  Voice arrives, inbound event is stored, readable error returned.
+  Useful for demos where live transcription is not required.
+  Voice event is still clearly visible in the UI with kind badge.
+
+PROOF REQUIRED (operator)
+  Happy path:
+  [ ] Send voice note → Telegram bot replies with transcription text
+  [ ] /session/latest shows voice inbound (kind=voice) + text outbound
+  [ ] UI transcript pane shows 🎙 VOICE badge on inbound entry
+  Degraded path (optional, proves safe failure):
+  [ ] Send voice note with no DEEPGRAM_API_KEY set
+  [ ] Bot replies with readable error message (not a crash)
+  [ ] UI shows 🎙 VOICE badge + "[voice note — transcription pending]"
+
+----------------------------------------------------------
+PATH 3: CALENDAR ACTION (CALENDAR_LIST_TODAY)
+----------------------------------------------------------
+Route:      GET /calendar/status?run=1
+Test:       dispatch CALENDAR_LIST_TODAY action via ?run=1
+
+READY STATE
+  condition:  CALENDAR_PROVIDER=demo (no external API key required)
+  behaviour:  handler dispatches action → DemoCalendarProvider returns
+              3 seed events anchored to today → reply_text formatted
+              with bullet list → /calendar/status?run=1 returns
+              invocation: { ok:true, event_count:3, reply_text: "..." }
+  proof:      curl ?run=1 → ok=true, 3 events, non-empty reply_text
+
+DEGRADED STATE — provider not configured
+  condition:  CALENDAR_PROVIDER unset, empty, "none", or "unconfigured"
+  behaviour:  /calendar/status returns provider.ready=false,
+              provider.reason=provider_not_configured;
+              invocation (when ?run=1): ok=false, error.code=provider_not_ready,
+              reply_text="I don't have a calendar connected yet. Ask the
+              operator to set CALENDAR_PROVIDER and I'll pick it up."
+  HTTP status: 200 (route never returns non-200)
+  UI:         #status-calendar shows "not ready" in red;
+              #calendar-action-bar shows ✗ result after first ?run=1
+  operator action: wrangler secret put CALENDAR_PROVIDER → demo
+
+DEGRADED STATE — unsupported provider
+  condition:  CALENDAR_PROVIDER set to an unsupported value (e.g. "google")
+  behaviour:  provider.ready=false, reason=provider_unsupported;
+              invocation ok=false, reply_text references "supported"
+  HTTP status: 200
+  operator action: change CALENDAR_PROVIDER to "demo" and redeploy
+
+SAFE FALLBACK MODE
+  Omit CALENDAR_PROVIDER entirely. The route is always up, always 200.
+  The handler returns an explicit not-configured message.
+  This is the correct demo of the failure path — no setup needed.
+
+PROOF REQUIRED (operator)
+  Happy path:
+  [ ] curl /calendar/status?run=1 → invocation.ok=true, event_count=3
+  [ ] UI #calendar-action-bar shows ✓ green result
+  [ ] UI #status-calendar shows "demo ready" (green)
+  Failure path (proves safe failure, zero external dependencies):
+  [ ] curl /calendar/status?run=1 with no CALENDAR_PROVIDER
+      → invocation.ok=false, error.code=provider_not_ready, HTTP 200
+  [ ] UI shows ✗ red result in calendar bar
+
+----------------------------------------------------------
+PATH 4: OPERATOR UI (SESSION / STATUS VISIBILITY)
+----------------------------------------------------------
+Route:      GET / (static HTML + JS)
+            GET /session/latest (session poll)
+            GET /calendar/status (calendar status poll)
+            GET /health (worker health)
+Test:       open operator UI, observe status bar and panes
+
+READY STATE (all providers configured)
+  Status bar: Core: ok | Voice: idle | Calendar: demo ready
+  Transcript pane: events render correctly (text clean, voice badged)
+  Calendar action bar: hidden until first ?run=1; then shows ✓/✗ result
+  Last-event marker: updates every 1 s
+
+DEGRADED STATE (calendar not configured)
+  Status bar: Core: ok | Voice: idle | Calendar: unconfigured not ready
+  Calendar action bar: hidden (no invocation present by default)
+  All other panes: unaffected
+
+DEGRADED STATE (calendar bar red)
+  After /calendar/status?run=1 returns ok=false:
+  Calendar action bar visible, shows ✗ red text with error code.
+  Status bar calendar pill shows "not ready" in red.
+  Transcript and response panes unaffected.
+
+SAFE FALLBACK
+  UI is always reachable. Static HTML + JS served from Cloudflare assets.
+  No env keys required for the UI to load. Status bar indicators degrade
+  gracefully when backend routes are not fully configured.
+
+PROOF REQUIRED (operator)
+  [ ] Open UI — status bar shows expected state within 5 s
+  [ ] Send a text message — appears in transcript pane
+  [ ] Send a voice note — 🎙 VOICE badge visible in transcript
+  [ ] View calendar status bar after ?run=1
+
+----------------------------------------------------------
+COMBINED READINESS SUMMARY
+----------------------------------------------------------
+PATH              READY?   SECRETS NEEDED       SAFE FAILURE?
+----------------  -------  -------------------  ----------------------------
+Text round trip   READY*   BOT_TOKEN            NO — requires Telegram creds
+                           WEBHOOK_SECRET
+Voice round trip  READY*   BOT_TOKEN            YES — degrades to readable
+                           WEBHOOK_SECRET        error msg + UI voice badge
+                           DEEPGRAM_API_KEY
+Calendar action   READY**  CALENDAR_PROVIDER    YES — always HTTP 200;
+                           (value: demo)         human-readable ok=false reply
+UI visibility     ALWAYS   (none)               YES — always reachable
+
+*  Both Telegram secrets are mandatory for any Telegram interaction.
+** CALENDAR_PROVIDER=demo requires no external API key; demo provider
+   is built into the deployed Worker binary.
+
+----------------------------------------------------------
+OPERATOR DECISION TREE — WHAT TO SET BEFORE DEMO
+----------------------------------------------------------
+Want to demo text only?
+  → Set TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET. Done.
+
+Want to demo voice transcription?
+  → Also set DEEPGRAM_API_KEY (+ optionally TRANSCRIPTION_PROVIDER=deepgram).
+
+Want to demo calendar (happy path)?
+  → Also set CALENDAR_PROVIDER=demo. No other key required.
+
+Want to demo calendar safe failure?
+  → Leave CALENDAR_PROVIDER unset. Call /calendar/status?run=1 to trigger.
+
+Want to demo voice safe failure?
+  → Leave DEEPGRAM_API_KEY unset. Send a voice note. Bot replies with
+    readable error. UI shows 🎙 VOICE badge.
+
+----------------------------------------------------------
+PATCH CONDITIONS (any one fails the S6 checkpoint)
+----------------------------------------------------------
+  [ ] Any route returns non-200 when a provider is unconfigured.
+  [ ] Any handler throws an uncaught exception on a missing env key.
+  [ ] reply_text is empty, null, or a raw stack trace on any failure path.
+  [ ] Operator must set a secret not listed in demo_env_matrix.txt to
+      complete any demo path.
+  [ ] UI does not show calendar status after CALENDAR_PROVIDER=demo is set.
+  [ ] Voice events render identically to text events (no kind badge).
+  [ ] readiness_matrix.txt or demo_env_matrix.txt is missing or covers
+      only Stage 2 paths.
