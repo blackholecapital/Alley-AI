@@ -256,3 +256,99 @@ local_test_run:      16 passed, 0 failed (16 total)
 repo_mirror_required: yes — written to /home/user/ALI-ai working tree
 commit_required:      yes — to be committed on claude/verify-api-endpoints-dxGjT
 push_required:        yes — to be pushed to origin
+
+══════════════════════════════════════════════════════════
+STAGE 4 ADDENDUM — EXEC-AI-STAGE4-001 | S3 | Worker B2
+Browser Voice Capture — POST /voice/capture
+══════════════════════════════════════════════════════════
+Branch:    claude/voice-capture-endpoint-DpjOq
+Companion: /worker-wb/test/browser-voice-roundtrip.test.ts
+
+----------------------------------------------------------
+S4.1 AUTOMATED TEST COVERAGE (browser-voice-roundtrip.test.ts)
+----------------------------------------------------------
+Run:  cd worker-wb && node --loader ./test/ts-resolve.mjs \
+        --experimental-strip-types \
+        test/browser-voice-roundtrip.test.ts
+Last local run: 24 passed, 0 failed (24 total)
+
+Areas covered:
+  R1.  Stub path — valid audio → 200 { ok: true, session_id }
+       + exactly one inbound item appended to session store.
+  R2.  Stub item text is non-null, encodes MIME type and byte size.
+  R3.  Two consecutive captures share one stable session_id.
+  R4.  Method guard: GET/DELETE → 405 { ok: false, error }.
+  R5.  Missing audio field → 400 { ok: false, error }.
+  R6.  String audio field → 400 { ok: false, error }.
+  R7.  Unsupported MIME (audio/mpeg, video/mp4, octet-stream) → 4xx.
+  R8.  Empty blob (0 bytes) → 400 { ok: false, error }.
+  R9.  Oversized blob (DEFAULT_MAX_VOICE_BYTES + 1) → 413 { ok: false }.
+  R10. All three accepted MIMEs (audio/webm, ogg, mp4) → 200.
+       audio/webm;codecs=opus (codec-qualified) also accepted.
+  R11. All rejection responses carry application/json content-type.
+  INV. Rejection requests do not pollute the session store.
+  INV. Handler never throws — always returns a Response.
+
+----------------------------------------------------------
+S4.2 PROOF STEPS — POST /voice/capture (curl-verifiable)
+----------------------------------------------------------
+
+Step S4-1 — Method guard (GET)
+  curl -s -X GET https://<worker>/voice/capture
+  Expected: 405 { "ok": false, "error": { "code": "method_not_allowed" } }
+
+Step S4-2 — Missing audio field
+  curl -s -X POST https://<worker>/voice/capture -F "notaudio=x"
+  Expected: 400 { "ok": false, "error": { "code": "bad_request" } }
+
+Step S4-3 — Unsupported MIME
+  dd if=/dev/urandom bs=1024 count=1 2>/dev/null > /tmp/t.mp3
+  curl -s -X POST https://<worker>/voice/capture \
+    -F "audio=@/tmp/t.mp3;type=audio/mpeg"
+  Expected: 4xx { "ok": false }, error message references "unsupported".
+
+Step S4-4 — Stub roundtrip (no DEEPGRAM_API_KEY)
+  dd if=/dev/urandom bs=1024 count=4 2>/dev/null > /tmp/t.webm
+  curl -s -X POST https://<worker>/voice/capture \
+    -F "audio=@/tmp/t.webm;type=audio/webm"
+  Expected: 200 { "ok": true, "session_id": "<uuid>" }
+
+Step S4-5 — Session store updated after capture
+  curl -s https://<worker>/session/latest \
+    | jq '.items[0] | {direction, source, text}'
+  Expected: direction="inbound", source="ui",
+            text="[voice: audio/webm, 4096 bytes]"
+
+----------------------------------------------------------
+S4.3 ACCEPTANCE GATES (Stage 4 S3 checkpoint)
+----------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] browser-voice-roundtrip.test.ts: 24 cases pass locally.
+  [ ] Steps S4-1 through S4-5 curl-verified on deployed worker.
+  [ ] Browser mic permission flow visible (Talk → permission prompt →
+      recording → Stop & Send → processing → result → idle).
+  [ ] Permission-denied state shows clear error, re-enables Talk button.
+  [ ] session_id stable across two captures.
+  [ ] Rejected requests do not add items to session store.
+  [ ] Repo committed and pushed to designated branch.
+
+PATCH conditions (any one fails the stage):
+  [ ] /voice/capture returns 2xx for invalid requests.
+  [ ] session_id changes between two consecutive captures.
+  [ ] Session store is polluted by rejected requests.
+  [ ] Handler throws instead of returning a Response.
+  [ ] Browser UI does not show permission prompt on Talk click.
+
+----------------------------------------------------------
+S4.4 STAGE 4 ARTIFACT SELF-CHECK
+----------------------------------------------------------
+expected_artifact_1: /worker-wb/src/integrations/telegram/voice.ts
+                     — handleVoiceCapture added (present)
+expected_artifact_2: /worker-wb/test/browser-voice-roundtrip.test.ts
+                     — present; 24/24 pass
+expected_artifact_3: /job_site/voice_demo_checklist.txt
+                     — this file (present, Stage 4 addendum appended)
+local_test_run:      24 passed, 0 failed (24 total)
+repo_mirror_required: yes
+commit_required:      yes
+push_required:        yes — to origin/claude/voice-capture-endpoint-DpjOq
