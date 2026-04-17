@@ -1,0 +1,258 @@
+VOICE DEMO CHECKLIST — EXEC-AI-STAGE3-004 | S3 | WORKER B
+==========================================================
+Generated: 2026-04-17
+Branch:    claude/verify-api-endpoints-dxGjT
+Companion: /worker-wb/test/telegram-voice-roundtrip.test.ts
+           /job_site/voice_failure_modes.txt
+Scope:     Exact operator proof steps for ONE live voice round trip
+           on Stage 3, plus the negative-path probes the operator must
+           run to prove fallback behavior.
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/factory-manual-v1.1.txt   (present on disk as
+                                       /job_site/factory-manual-v1.11.txt
+                                       — same active manual per its
+                                       PRECEDENCE LAW)
+- /job_site/worker-execution-manual-v1.1.txt
+- /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+- /job_site/cloudflare_access_matrix.txt   (Stage 3 surface contract)
+- /worker-wb/src/integrations/telegram/voice.ts
+- /worker-wb/src/providers/transcription/{provider,index}.ts
+- /worker-wb/src/routes/telegram-webhook.ts
+
+NOTE: /job_site/reference_repo_matrix.txt is still absent from the run
+package (flagged by foreman). It is NOT in this worker's
+required_references, so this task proceeds; Worker A still owes the
+matrix before CF-TEST.
+
+----------------------------------------------------------
+1. STAGE 3 S3 GOLDEN-PATH CONTRACT
+----------------------------------------------------------
+Build sheet S3 goal:
+  "Complete one stable voice-note flow from Telegram into the assistant
+   pipeline and back out to the user."
+
+Build sheet operator note (relevant to reply mode):
+  "Voice can close with text fallback if spoken-audio reply is not
+   stable enough for this stage."
+
+Stage 3 S3 contract pinned by this checklist + the companion test:
+  R1. Voice in -> media fetched -> transcribed -> ONE outbound reply.
+  R2. Reply mode for Stage 3 = text_fallback (kind="text" outbound).
+      Spoken-audio reply is OUT OF SCOPE this stage.
+  R3. Failure paths (media_fetch_failed, transcription_failed,
+      unsupported_media) record exactly one failure event, return
+      HTTP 200, do not throw, and do NOT emit a reply.
+  R4. Outbound chat_id == inbound chat.id;
+      reply_to_message_id == inbound message_id;
+      reply text derives from the transcript (non-empty, varies).
+  R5. UI session_id stays stable across the round trip.
+
+----------------------------------------------------------
+2. AUTOMATED TEST COVERAGE MATRIX
+----------------------------------------------------------
+File: /worker-wb/test/telegram-voice-roundtrip.test.ts
+Run:  cd worker-wb && node --experimental-strip-types \
+        test/telegram-voice-roundtrip.test.ts
+Last local run on this branch: 16 passed, 0 failed (16 total)
+
+Areas covered:
+  A. Enum/contract coherence
+       failure-reason enum closed + stable
+       reply-mode enum closed; Stage 3 default = text_fallback
+       happy-path fixture under the 20 MiB cap
+       unsupported-media fixture has neither voice nor text
+  B. Happy round-trip (R1, R2, R4)
+       voice in -> fetched -> transcribed -> one text-fallback outbound
+       distinct transcripts produce distinct replies (no static ack)
+  C. Failure modes (R3)
+       media_fetch_failed: 200, no throw, one failure event, no outbound
+       transcription_failed: 200, no throw, one failure event, no outbound
+       unsupported_media: 200, no throw, no fetch, no transcribe
+  D. Reply fallback mode (R2, R4)
+       outbound kind = "text"; reply_mode = "text_fallback"
+       outbound chat_id + reply_to_message_id wired to inbound
+       outbound derived_from_event_id ties back to inbound event id
+       failure paths silently record failure (no fabricated reply)
+  E. Cross-cutting invariants
+       every simulated path returns webhook 200 and threw=false
+       every failure event carries failure_reason from the closed enum
+       TRANSCRIPTION_TIMEOUT_MS within Telegram's 30 s retry window
+
+----------------------------------------------------------
+3. PRE-FLIGHT (operator)
+----------------------------------------------------------
+Required:
+  [ ] Worker deployed from /worker-wb to *.workers.dev
+      (per /job_site/cloudflare_access_matrix.txt — workers.dev is the
+      safe Telegram surface unless the Access Bypass policy explicitly
+      lists /telegram/webhook).
+  [ ] Secrets set via `wrangler secret put` in the /worker-wb context:
+        TELEGRAM_BOT_TOKEN
+        TELEGRAM_WEBHOOK_SECRET
+        DEEPGRAM_API_KEY            (or TRANSCRIPTION_PROVIDER=noop for
+                                     a dry-run that exercises the
+                                     transcription_failed path on
+                                     purpose)
+  [ ] Telegram webhook registered against the workers.dev URL with
+      allowed_updates includes "message" so voice notes arrive.
+  [ ] Operator UI shell open at the Worker root ("/").
+  [ ] /session/latest reachable from the operator browser
+      (200 JSON, not 302 to Access login).
+
+----------------------------------------------------------
+4. ONE LIVE VOICE ROUND-TRIP — EXACT PROOF STEPS
+----------------------------------------------------------
+Capture all curl outputs and UI screenshots into the demo evidence
+folder; reference them from /job_site/cloudflare_test_evidence_index.txt
+when CF-TEST opens.
+
+Step 1 — record the starting baseline
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" \
+    | jq '{session_id: .session.session_id, counts: .counts}'
+  Capture: starting session_id (call it SID0); counts.
+
+Step 2 — record a SHORT voice note in Telegram
+  Action: in the Telegram client chat with the bot, hold the mic icon,
+          say one short sentence (≤ 4 seconds), release.
+          Suggested phrase (deterministic content makes evidence
+          easier to verify):
+            "remind me to call alice tomorrow"
+  Expect (within ~5 s):
+    - bot reply visible in Telegram client.
+    - The reply is a TEXT message (Stage 3 reply mode = text_fallback).
+      Body should contain the transcript content (e.g. starts with
+      "transcribed:" today; the exact prefix may change as Worker A
+      polishes the reply path — what matters is that the text is
+      non-empty AND derives from what the operator said).
+
+Step 3 — verify session store reflects voice in + text out
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" \
+    | jq '{session_id: .session.session_id,
+            counts: .counts,
+            head: .items[0:2] | map({direction, kind, chat_id, text})}'
+  Expect:
+    - session_id == SID0 (stable across the round trip).
+    - counts.inbound increased by 1.
+    - counts.outbound increased by 1.
+    - items[0] (newest): direction=outbound, kind="text",
+      text non-empty, contains the spoken phrase.
+    - items[1]: direction=inbound, kind="voice",
+      text == the transcript of the spoken phrase.
+    - chat_id on both items equals your private chat id.
+
+Step 4 — UI cross-check
+  In the operator UI confirm:
+    [ ] one new voice-inbound bubble with the transcript text
+    [ ] one new text-outbound bubble with the assistant reply
+    [ ] both bubbles carry timestamps within seconds of each other
+    [ ] last_event_at on the status surface advanced
+
+Step 5 — capture evidence
+  [ ] Telegram screenshot showing voice note + bot text reply
+  [ ] curl output from Step 1 (baseline)
+  [ ] curl output from Step 3 (after the round trip)
+  [ ] UI screenshot showing the new in/out pair
+
+----------------------------------------------------------
+5. NEGATIVE-PATH PROOFS (REQUIRED FOR S3 CHECKPOINT)
+----------------------------------------------------------
+At least ONE failure mode below MUST be exercised live and captured;
+the test file proves the contract for all three deterministically.
+
+5A. unsupported_media (cheapest to provoke)
+  Action: send a sticker (any sticker) to the bot.
+  Expect: webhook returns 200; UI gains one inbound row with a
+          failure badge "unsupported media type" (or equivalent
+          failure_reason="unsupported_media" surfaced by the UI).
+          NO outbound reply is produced.
+  Verify:
+    curl -s "https://ali-ai.<account>.workers.dev/session/latest" \
+      | jq '.items[0] | {direction, kind, text, failure_reason}'
+    Expect: direction=inbound, text=null, failure_reason="unsupported_media".
+
+5B. media_fetch_failed (provoke by token mismatch — DRY RUN ONLY)
+  Out of scope for the live demo; rely on the test file for proof of
+  contract because flipping the bot token live invalidates other
+  steps in the demo runbook. Note the test cases:
+    "media_fetch_failed: 200, no throw, one failure event, no outbound"
+
+5C. transcription_failed (provoke by setting TRANSCRIPTION_PROVIDER=noop)
+  Optional dry-run: temporarily push
+    wrangler secret put TRANSCRIPTION_PROVIDER  (value: "noop")
+  send a voice note, verify the failure path:
+    curl -s "https://ali-ai.<account>.workers.dev/session/latest" \
+      | jq '.items[0] | {direction, kind, text, failure_reason}'
+    Expect: direction=inbound, text=null,
+            failure_reason="transcription_failed" (or
+            "transcription_empty" depending on which gate fires
+            for the noop provider).
+  After verifying, restore TRANSCRIPTION_PROVIDER (unset or set back
+  to "deepgram") so Step 2 of the next demo run still works.
+
+----------------------------------------------------------
+6. ACCEPTANCE GATES (for S3 checkpoint)
+----------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] /worker-wb/test/telegram-voice-roundtrip.test.ts exists; the
+      16 cases all pass locally.
+  [ ] /job_site/voice_failure_modes.txt is current for Stage 3 (this
+      checklist's companion catalogue).
+  [ ] /job_site/voice_demo_checklist.txt exists (this file).
+  [ ] Live Steps 1-5 succeed for one voice note: voice in, text
+      reply out, both visible in UI within seconds.
+  [ ] Reply text is non-empty AND contains transcript-derived content.
+  [ ] Section 5 negative path 5A succeeds live (cheapest to demo).
+  [ ] session_id stable; chat_id matches end-to-end.
+  [ ] Repo mirrored, committed, pushed to designated branch.
+
+PATCH conditions (any one fails):
+  [ ] Webhook returns non-200 on any voice / failure path.
+  [ ] Top-level fetch handler throws (Worker isolate emits 1101).
+  [ ] Voice-in produces no outbound row when transcription succeeded.
+  [ ] Outbound text is empty, missing, or static across distinct
+      transcripts (proves reply derives from transcript is broken).
+  [ ] Failure path emits zero or more than one failure event.
+  [ ] Failure path fabricates a reply (Stage 3 contract: silent on
+      failure; UI shows the badge).
+  [ ] session_id changes mid-conversation.
+
+----------------------------------------------------------
+7. ISSUES / FLAGS
+----------------------------------------------------------
+- Build sheet cites /job_site/factory-manual-v1.1.txt; file on disk is
+  /job_site/factory-manual-v1.11.txt (v1.11 lean). Treated as the same
+  active manual per PRECEDENCE LAW. Flag only.
+- /job_site/reference_repo_matrix.txt remains absent from the run
+  package. Foreman flagged this on hand-off. It is NOT in this
+  worker's required_references; this task proceeds. Worker A still
+  owes the matrix before CF-TEST.
+- The current /worker-wb/src/integrations/telegram/voice.ts uses a
+  finer-grained internal failure enum (`getfile_http_error`,
+  `download_network_error`, `duration_too_long`, `size_too_large`, ...)
+  than the operator-facing Stage-3 enum
+  (`media_fetch_failed`, `payload_too_large`, `transcription_*`,
+  `unsupported_media`). Worker A must collapse the internal codes onto
+  the operator-facing enum before they reach the session store, so the
+  UI can branch on a stable, closed set. The companion test pins the
+  operator-facing enum.
+- The current /worker-wb/src/routes/telegram-webhook.ts handleVoiceEvent
+  early-returns silently on transcription failure or media-fetch
+  failure (no failure event is appended to the session store today).
+  Worker A's S3 task includes wiring those failure events; until that
+  lands, live Step 5A will show only the inbound voice row without a
+  failure_reason badge. The contract test still proves the target
+  shape so the operator can verify after Worker A's S3 push.
+
+----------------------------------------------------------
+8. ARTIFACT SELF-CHECK
+----------------------------------------------------------
+expected_artifact_1: /worker-wb/test/telegram-voice-roundtrip.test.ts  — present
+expected_artifact_2: /job_site/voice_demo_checklist.txt                — present (this file)
+expected_artifact_3: /job_site/voice_failure_modes.txt                  — updated for Stage 3
+local_test_run:      16 passed, 0 failed (16 total)
+repo_mirror_required: yes — written to /home/user/ALI-ai working tree
+commit_required:      yes — to be committed on claude/verify-api-endpoints-dxGjT
+push_required:        yes — to be pushed to origin

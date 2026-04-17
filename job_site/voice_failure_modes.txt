@@ -1,72 +1,108 @@
-VOICE FAILURE MODES — EXEC-AI-STAGE2-003 | S4 | WORKER B
+VOICE FAILURE MODES — EXEC-AI-STAGE3-004 | S3 | WORKER B
 ==========================================================
-Generated: 2026-04-16
-Branch:    claude/verify-cloudflare-access-oKfsP
-Scope:     Failure-mode catalogue + fallback contract for Telegram
-           voice intake. Four declared areas: transcription failure,
-           unsupported media, oversized payloads, failed media fetches.
-Companion: /worker-wb/test/telegram-voice-intake.test.ts
+Generated: 2026-04-17
+Branch:    claude/verify-api-endpoints-dxGjT
+Scope:     Failure-mode catalogue + fallback contract for the Stage 3
+           voice round-trip path. Pinned modes:
+             - media_fetch_failed
+             - transcription_failed (incl. timeout + empty)
+             - unsupported_media
+             - reply fallback mode (text-out for voice-in)
+Companion: /worker-wb/test/telegram-voice-roundtrip.test.ts
+           /job_site/voice_demo_checklist.txt
 
--------------------------------------------------------------------
+Supersedes: the Stage 2 EXEC-AI-STAGE2-003 / S4 version of this file
+            (same path; the Stage 3 build sheet declares the same
+            artifact and tightens the contract for reply mode).
+
+----------------------------------------------------------
 0. REFERENCES CONSULTED
--------------------------------------------------------------------
-- /job_site/factory-manual-v1.1.txt    (present as factory-manual-v1.11.txt)
+----------------------------------------------------------
+- /job_site/factory-manual-v1.1.txt   (present on disk as
+                                       /job_site/factory-manual-v1.11.txt
+                                       — same active manual per
+                                       PRECEDENCE LAW)
 - /job_site/worker-execution-manual-v1.1.txt
-- /job_site/build-sheet-EXEC-AI-STAGE2-003.txt
-- /job_site/reference_repo_matrix.txt  (NOT PRESENT — substituted by
-   the build sheet's `reference_materials` block: grammY, m-sarabi,
-   cvzi, deepgram, openclaw — see §7 ISSUES)
-- on-disk contracts already shipped:
-    /worker-wb/src/integrations/telegram/types.ts   (InternalEvent, TelegramVoice)
-    /worker-wb/src/routes/telegram-webhook.ts       (webhook entry)
-    /worker-wb/src/routes/session-latest.ts         (UI surface)
-    /worker-wb/src/lib/session-store.ts             (event store)
-    /job_site/ui_state_contract.txt                 (S3 contract)
+- /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+- on-disk contracts:
+    /worker-wb/src/integrations/telegram/types.ts
+    /worker-wb/src/integrations/telegram/voice.ts
+    /worker-wb/src/providers/transcription/{provider,index}.ts
+    /worker-wb/src/routes/telegram-webhook.ts
+    /worker-wb/src/lib/session-store.ts
+- foreman flag: /job_site/reference_repo_matrix.txt is still absent
+  from the run package; not in this worker's required_references, so
+  this task proceeds. Worker A owes the matrix before CF-TEST.
 
--------------------------------------------------------------------
+----------------------------------------------------------
 1. SAFETY INVARIANTS (every failure mode obeys all four)
--------------------------------------------------------------------
+----------------------------------------------------------
 I-1  Webhook MUST ack 200. Telegram retries for ~24 hours on any
      non-2xx; a stuck retry loop hides the real failure from the
-     operator. Return `{ ok: true, handled: false, reason: "<code>" }`.
-I-2  Top-level fetch handler MUST NOT throw. Any provider exception,
-     network error, or malformed payload is caught and converted into
-     a failure event. Uncaught throws crash the Worker isolate and
-     emit an opaque 1101 to Telegram.
+     operator. Body is `{"ok":true}`.
+I-2  Top-level fetch handler MUST NOT throw. Provider exceptions,
+     network errors, and malformed payloads are caught and converted
+     to failure events. Uncaught throws crash the isolate and emit
+     opaque 1101 to Telegram.
 I-3  Exactly ONE failure event is appended to the session store per
-     failed update. Duplicate emits would inflate the UI history and
-     confuse the operator.
-I-4  The failure event carries a STABLE `failure_reason` code from the
-     closed enum in §2 so the UI can branch on reason, not on free
-     text. `failure_detail` carries the human-readable context.
+     failed update. Duplicate emits inflate the UI history.
+I-4  The failure event carries a STABLE `failure_reason` from the
+     closed enum in §2 so the UI can branch on reason, not free text.
+     `failure_detail` carries the human-readable context.
 
--------------------------------------------------------------------
-2. CLOSED FAILURE-REASON ENUM
--------------------------------------------------------------------
+Stage 3 ADDITION:
+I-5  Failure paths MUST NOT fabricate an outbound reply. UI surfaces
+     the failure badge; operator decides whether to ask the user to
+     retry. Audit trail must distinguish "voice failed silently" from
+     "assistant responded with apology".
+
+----------------------------------------------------------
+2. CLOSED FAILURE-REASON ENUM (operator-facing)
+----------------------------------------------------------
     transcription_failed   — provider returned a non-2xx, non-retryable
                              error, or an unparseable response body.
     transcription_timeout  — provider exceeded TRANSCRIPTION_TIMEOUT_MS
-                             (default 15 000 ms — stays inside
-                             Telegram's 30 s webhook ack window).
+                             (default 15 000 ms — inside Telegram's
+                             30 s webhook ack window).
     transcription_empty    — provider returned 200 but no text (silence,
                              unknown language, corrupted audio).
     unsupported_media      — update has no voice and no text; e.g.
                              sticker, photo, video, video_note,
                              document, animation. Ack only, no work.
     payload_too_large      — voice.file_size exceeds
-                             VOICE_PAYLOAD_LIMIT_BYTES (20 MiB cap from
-                             Telegram Bot API getFile). Gate MUST fire
-                             before any network fetch.
+                             VOICE_PAYLOAD_LIMIT_BYTES (20 MiB cap).
+                             Gate MUST fire before any network fetch.
     media_fetch_failed     — getFile or file-download URL returned
                              non-2xx, threw, or returned the wrong
                              content type.
 
--------------------------------------------------------------------
-3. FALLBACK CONTRACT (expected normalized failure event)
--------------------------------------------------------------------
+The current voice.ts uses a finer-grained internal enum
+(`getfile_http_error`, `download_network_error`, `duration_too_long`,
+`size_too_large`, `getfile_missing_path`, ...). Worker A's S3 task is
+to COLLAPSE those internal codes onto the operator-facing enum above
+before the failure reaches the session store. The companion test
+pins the operator-facing enum.
+
+----------------------------------------------------------
+3. CLOSED REPLY-MODE ENUM (Stage 3 addition)
+----------------------------------------------------------
+    text_fallback   — voice in -> text out (Stage 3 default).
+                      Outbound row has kind="text" and
+                      reply_mode="text_fallback".
+    voice_native    — voice in -> spoken-audio out. OUT OF SCOPE for
+                      Stage 3; reserved for a future stage. The
+                      operator UI must tolerate the field but no
+                      code path emits this value yet.
+
+Build-sheet operator note that justifies Stage 3 default:
+  "Voice can close with text fallback if spoken-audio reply is not
+   stable enough for this stage."
+
+----------------------------------------------------------
+4. FALLBACK CONTRACT (expected normalized failure event)
+----------------------------------------------------------
 Every failure emits ONE event conforming to this shape (mirrors the
-S3 UI contract in /job_site/ui_state_contract.txt plus two voice
-fields):
+S5 UI contract, plus the two voice fields):
 
     {
       "id":             "telegram:<update_id>",
@@ -80,147 +116,205 @@ fields):
       "text":           null,
       "received_at":    "<ISO8601>",
       "failure_reason": "<enum value from §2>",
-      "failure_detail": "<short human string; never stack trace>"
+      "failure_detail": "<short human string; never a stack trace>"
     }
 
-The UI (apps/operator-shell/src/ui/session-view.js) must show the
-failure badge when `failure_reason` is present. `text` is null on
-failure so the transcript pane does not render an empty bubble.
+The UI shows the failure badge when `failure_reason` is present.
+`text` is null on failure so the transcript pane does not render
+an empty bubble.
 
--------------------------------------------------------------------
-4. FAILURE-MODE MATRIX
--------------------------------------------------------------------
+Successful turns emit TWO events (inbound + outbound):
+
+    inbound:
+      kind="voice", direction="inbound",
+      text=<transcript>, no failure_reason
+
+    outbound:
+      kind="text", direction="outbound",
+      reply_mode="text_fallback",
+      chat_id == inbound.chat.id,
+      reply_to_message_id == inbound.message_id,
+      derived_from_event_id == inbound.id,
+      text non-empty AND derived from the transcript
+
+----------------------------------------------------------
+5. FAILURE-MODE MATRIX
+----------------------------------------------------------
 
 Mode: transcription_failed
   trigger:          provider returns 4xx/5xx with parseable error, or
                     returns a body the provider adapter cannot parse
-  gate location:    /worker-wb/src/providers/transcription/provider.ts
-                    (inside the adapter call; caught in voice.ts)
-  webhook response: 200 { ok:true, handled:false, reason:"transcription_failed" }
-  session event:    kind=voice, text=null, failure_reason="transcription_failed"
+  gate location:    /worker-wb/src/providers/transcription/index.ts
+                    (DeepgramTranscriptionProvider.transcribe);
+                    caught in telegram-webhook.ts handleVoiceEvent
+  webhook response: 200 {"ok":true}
+  session event:    kind=voice, text=null,
+                    failure_reason="transcription_failed"
+  reply emitted?:   NO (per I-5)
   operator UI:      response pane shows failure badge + detail text
-  test:             TRANSCRIPTION_ERROR_FIXTURE drives this path
+  test:             "transcription_failed: 200, no throw, one failure
+                     event, no outbound"
 
 Mode: transcription_timeout
   trigger:          provider call exceeds TRANSCRIPTION_TIMEOUT_MS
-  gate location:    voice.ts wraps the adapter call in an AbortController
-                    with a 15 s deadline
-  webhook response: 200 { ok:true, handled:false, reason:"transcription_timeout" }
+  gate location:    voice.ts wraps the adapter call in an
+                    AbortController with a 15 s deadline (Worker A
+                    S3 owes this wrapper if not yet present)
+  webhook response: 200 {"ok":true}
   session event:    failure_reason="transcription_timeout"
-  operator UI:      failure badge; UI states error in-place
-  test:             TRANSCRIPTION_TIMEOUT_FIXTURE
+  reply emitted?:   NO
+  operator UI:      failure badge "timed out"
+  test:             covered by enum closure + safety invariants
 
 Mode: transcription_empty
-  trigger:          provider returns 200 with empty/whitespace transcript
-  gate location:    voice.ts validates provider result before emitting
-  webhook response: 200 { ok:true, handled:false, reason:"transcription_empty" }
+  trigger:          provider returns 200 with empty/whitespace text
+  gate location:    DeepgramTranscriptionProvider.transcribe already
+                    returns ok:false reason:"empty transcript" — Worker
+                    A must map that to "transcription_empty" before
+                    the failure reaches the session store
+  webhook response: 200 {"ok":true}
   session event:    failure_reason="transcription_empty"
+  reply emitted?:   NO
   operator UI:      failure badge "no speech detected"
-  test:             TRANSCRIPTION_EMPTY_FIXTURE
 
 Mode: unsupported_media
   trigger:          update has no voice and no text
                     (sticker, photo, video, video_note, document, ...)
-  gate location:    voice.ts classifier — runs BEFORE any fetch
-  webhook response: 200 { ok:true, handled:false, reason:"unsupported_media" }
-  session event:    failure_reason="unsupported_media"
+  gate location:    classifier in inbound.ts / voice.ts — runs BEFORE
+                    any fetch
+  webhook response: 200 {"ok":true}
+  session event:    failure_reason="unsupported_media",
+                    failure_detail="update has no voice and no text"
+  reply emitted?:   NO
   operator UI:      failure badge "unsupported media type"
-  tests:            UNSUPPORTED_STICKER_UPDATE_FIXTURE,
-                    UNSUPPORTED_VIDEO_NOTE_UPDATE_FIXTURE
+  test:             "unsupported_media: 200, no throw, one failure
+                     event, no fetch, no transcribe"
 
 Mode: payload_too_large
   trigger:          message.voice.file_size > VOICE_PAYLOAD_LIMIT_BYTES
   gate location:    voice.ts size gate — runs BEFORE any getFile call
-                    (critical: saves bandwidth + CPU on hopeless files)
-  webhook response: 200 { ok:true, handled:false, reason:"payload_too_large" }
+                    (already present today: see voice.ts size_too_large
+                    branch; Worker A must surface it as
+                    "payload_too_large" to the session store)
+  webhook response: 200 {"ok":true}
   session event:    failure_reason="payload_too_large",
                     failure_detail="file_size <N> exceeds limit <LIMIT>"
+  reply emitted?:   NO
   operator UI:      failure badge "payload too large"
-  test:             VOICE_UPDATE_OVERSIZED_FIXTURE
 
 Mode: media_fetch_failed
-  trigger:          getFile returns non-2xx, or file-download URL
-                    returns non-2xx / wrong content-type / throws
-  gate location:    voice.ts wraps both fetch() calls; no raw throw
-                    escapes to the top level
-  webhook response: 200 { ok:true, handled:false, reason:"media_fetch_failed" }
+  trigger:          getFile non-2xx / unparseable / missing file_path,
+                    or download URL non-2xx / network throw
+  gate location:    voice.ts wraps both fetch() calls; the internal
+                    `getfile_http_error`, `download_http_error`,
+                    `getfile_network_error`, `download_network_error`,
+                    `getfile_non_json`, `getfile_missing_path` codes
+                    all collapse onto media_fetch_failed at the
+                    session-store boundary
+  webhook response: 200 {"ok":true}
   session event:    failure_reason="media_fetch_failed"
+  reply emitted?:   NO
   operator UI:      failure badge "could not fetch media"
-  tests:            GET_FILE_NOT_FOUND_FIXTURE,
-                    FILE_DOWNLOAD_FAIL_FIXTURE,
-                    FILE_DOWNLOAD_NETWORK_ERROR_FIXTURE
+  test:             "media_fetch_failed: 200, no throw, one failure
+                     event, no outbound"
 
--------------------------------------------------------------------
-5. FAILURE-ORDER GATES (decision flow inside voice.ts)
--------------------------------------------------------------------
-Worker A's voice.ts must evaluate gates in THIS ORDER, because each
+----------------------------------------------------------
+6. FAILURE-ORDER GATES (decision flow inside voice.ts)
+----------------------------------------------------------
+Worker A's voice path must evaluate gates in THIS ORDER, because each
 earlier gate short-circuits work that later gates would have wasted:
 
   1. unsupported_media           — no voice field at all
-  2. payload_too_large           — voice.file_size > limit
+  2. payload_too_large           — voice.file_size > limit (size gate)
   3. media_fetch_failed          — getFile
   4. media_fetch_failed          — download file_path
   5. transcription_timeout       — racing the provider
   6. transcription_failed        — provider non-2xx / parse error
   7. transcription_empty         — provider ok but empty text
-  8. SUCCESS                     — emit normal voice event with text
+  8. SUCCESS                     — emit inbound voice event with text
+                                   AND outbound text-fallback reply
 
--------------------------------------------------------------------
-6. TESTS / FIXTURE COVERAGE (see .test.ts for exact assertions)
--------------------------------------------------------------------
-Assertions in /worker-wb/test/telegram-voice-intake.test.ts:
-  * failure-reason enum is closed and stable
-  * oversized fixture actually exceeds the 20 MiB cap
-  * ok fixture stays under the cap
-  * unsupported-media fixtures carry no voice and no text
-  * getFile error fixture returns non-2xx with ok:false
-  * file-download fail fixture returns 404
-  * transcription error/timeout/empty map to distinct reasons
-  * every expected failure event exposes every required shape key
-  * every expected failure event carries a valid failure_reason
-  * failure events preserve chat/message identity
-  * failure events set direction=inbound, source=telegram, kind=voice,
-    text=null
-  * payload-size gate fires before any network fetch
-  * transcription timeout constant is within the webhook ack window
+----------------------------------------------------------
+7. REPLY FALLBACK CONTRACT (Stage 3 expansion)
+----------------------------------------------------------
+On the SUCCESS branch (gate 8) the webhook MUST also emit one
+outbound row with:
 
-Runnable:
-  node --experimental-strip-types worker-wb/test/telegram-voice-intake.test.ts
+  kind                   = "text"
+  direction              = "outbound"
+  source                 = "telegram"
+  reply_mode             = "text_fallback"
+  chat_id                = inbound.chat.id
+  reply_to_message_id    = inbound.message_id
+  derived_from_event_id  = inbound.id
+  text                   = non-empty string derived from the
+                           transcript (NOT a static ack; identical
+                           transcripts may produce identical replies,
+                           but distinct transcripts MUST produce
+                           distinct replies)
 
--------------------------------------------------------------------
-7. ISSUES / FLAGS
--------------------------------------------------------------------
-- /job_site/reference_repo_matrix.txt still absent on main (S1 artifact);
-  the build sheet's own reference_materials block substitutes.
-- Worker A S4 artifacts NOT PRESENT on main:
-    /worker-wb/src/integrations/telegram/voice.ts
-    /worker-wb/src/providers/transcription/provider.ts
-    /worker-wb/src/providers/transcription/index.ts
-  Tests and fixtures are written at the contract level so Worker B is
-  not blocked. When Worker A ships, test assertions should be lifted
-  from fixture-shape checks to live handler behavior against these
-  fixtures.
-- The current webhook handler /worker-wb/src/routes/telegram-webhook.ts
-  today returns `{ ok:true, handled:false, reason:"kind:voice", ... }`
-  for voice kind — that is an acceptable placeholder (matches I-1, I-2)
-  but does NOT yet emit a failure event to the session store. Worker A
-  must add that emission in S4 for the UI to see the voice path at all.
+On every failure branch (gates 1-7) NO outbound row is emitted.
+This split is the audit-trail invariant the operator UI relies on
+to distinguish "we replied" from "we surfaced a failure".
 
--------------------------------------------------------------------
-8. ACCEPTANCE GATES (for S4 checkpoint)
--------------------------------------------------------------------
+----------------------------------------------------------
+8. TESTS / FIXTURE COVERAGE
+----------------------------------------------------------
+File: /worker-wb/test/telegram-voice-roundtrip.test.ts
+Run:  cd worker-wb && node --experimental-strip-types \
+        test/telegram-voice-roundtrip.test.ts
+Last local run on this branch: 16 passed, 0 failed (16 total)
+
+Test cases pinned to this catalogue:
+  * failure reason enum is closed and stable across stages
+  * reply mode enum is closed and Stage 3 default is text_fallback
+  * happy-path voice fixture stays under the 20 MiB cap
+  * unsupported-media fixture has neither voice nor text
+  * happy path: voice in -> fetched -> transcribed -> ONE text-fallback
+    outbound reply
+  * happy path with different transcripts produces different replies
+  * media_fetch_failed: 200, no throw, one failure event, no outbound
+  * transcription_failed: 200, no throw, one failure event, no outbound
+  * unsupported_media: 200, no throw, one failure event, no fetch,
+    no transcribe
+  * reply fallback mode: voice in always closes with kind="text"
+    outbound
+  * reply fallback mode: chat round-trip closure
+  * reply fallback mode: outbound is linked back to its inbound id
+  * reply fallback mode: failure paths do NOT emit a reply
+  * every simulated path returns webhook 200 and threw=false
+  * failure events always have stable failure_reason from the closed
+    enum
+  * transcription timeout constant stays inside the Telegram webhook
+    ack window
+
+----------------------------------------------------------
+9. ACCEPTANCE GATES (for S3 checkpoint)
+----------------------------------------------------------
 PASS conditions:
-  [ ] webhook returns 200 on every failure mode in §4.
+  [ ] webhook returns 200 on every failure mode in §5 and on success.
   [ ] top-level fetch never throws on any fixture in this catalogue.
-  [ ] exactly one failure event is appended per failed update.
-  [ ] failure_reason values come only from the enum in §2.
-  [ ] gate order in §5 is honored (payload-size before any fetch).
-  [ ] operator UI visibly renders the failure entry (badge + detail).
+  [ ] exactly one failure event is appended per failed update;
+      exactly one inbound + one outbound row per successful update.
+  [ ] failure_reason values come only from the enum in §2 (operator-
+      facing collapse from voice.ts internal codes is in place).
+  [ ] reply_mode on outbound voice rows is "text_fallback"; kind is
+      "text".
+  [ ] gate order in §6 is honored (size before any fetch).
+  [ ] operator UI visibly renders the failure entry (badge + detail)
+      AND the success in/out pair.
+  [ ] §7 reply fallback contract holds: outbound only on success;
+      reply text non-empty AND transcript-derived.
   [ ] repo mirrored, committed, pushed to designated branch.
 
 PATCH conditions (any one fails):
-  [ ] an uncaught throw escapes fetch handler.
-  [ ] failure_reason missing / free-text / unknown value.
+  [ ] uncaught throw escapes the fetch handler.
+  [ ] failure_reason missing / free-text / outside the enum.
   [ ] more than one failure event per update.
-  [ ] payload-size check runs AFTER a getFile/download attempt.
+  [ ] payload-size check runs AFTER a getFile / download attempt.
+  [ ] success path produces zero or more than one outbound reply.
+  [ ] failure path produces an outbound reply (Stage 3 contract: NO).
+  [ ] outbound reply text is empty, missing, or static across distinct
+      transcripts.
+  [ ] reply_mode missing or set to a value not in §3 enum.
   [ ] UI shows a silent failure (no visible render).
