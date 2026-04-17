@@ -25,17 +25,27 @@ build-sheet declarations (Stage 3):
   preview_urls_required:       yes
   custom_domain_if_any:        existing Stage 2 live custom domain
 
-wrangler.jsonc declarations:
+wrangler.jsonc declarations (current):
   name:          "ali-ai"
   main:          "src/index.ts"
   workers_dev:   true     (non-gated *.workers.dev URL available)
   preview_urls:  true
   assets:        { directory: "./public" }   (static UI shell)
 
+src/index.ts router state (current, pre-S4):
+  matched paths: /telegram/webhook, /session/latest, /health, /ui/send
+  unmatched   :  /calendar/status  -> 404 (handler not yet created;
+                 S4 worker_a owes /worker-wb/src/routes/calendar-status.ts)
+
+reference-manual note:
+  build sheet cites /job_site/factory-manual-v1.1.txt; file on disk is
+  /job_site/factory-manual-v1.11.txt (v1.11 lean). Treated as the same
+  active manual per its PRECEDENCE LAW. Flag only.
+
 -------------------------------------------------------------------
 2. ACCESS SURFACE MODEL
 -------------------------------------------------------------------
-Two public surfaces exist for the same Worker ("ali-ai"):
+Two public surfaces continue to exist for the Worker ("ali-ai"):
 
   A. workers.dev surface — ali-ai.<account>.workers.dev
      - Not covered by Cloudflare Access / Zero Trust.
