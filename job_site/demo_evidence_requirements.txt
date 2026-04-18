@@ -1,233 +1,295 @@
-DEMO EVIDENCE REQUIREMENTS — EXEC-AI-STAGE2-003
-================================================
-Stage:       S5 (Minimal observability and runtime clarity)
-Owner:       Worker B
-Generated:   2026-04-16
-Scope:       Exact evidence artifacts Foreman B (Systems Foreman)
-             must have in hand to pass CF-TEST, CF-VERIFY, and S6
-             checkpoints. Captures what runbook steps produce; maps
-             each evidence item to the build-sheet acceptance gate
-             it satisfies.
+DEMO EVIDENCE REQUIREMENTS — EXEC-AI-STAGE4-001 | S6 | WORKER A
+================================================================
+Generated: 2026-04-18
+Branch:    claude/add-calendar-settings-3iOUJ
+Scope:     Exact evidence items Foreman B (Systems Foreman) and
+           Factory Control Interface need in hand to close the
+           Stage 4 CF-TEST, CF-VERIFY, and final checksum gates.
+           Each item is tied to a demo_runbook.txt path and to
+           a build-sheet validation_check.
+Companion: /job_site/demo_runbook.txt
 
-Companion runbook:  /job_site/demo_runbook.txt
-Build sheet:        /job_site/build-sheet-EXEC-AI-STAGE2-003.txt
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/Build Sheet — EXEC-AI-STAGE4-001.txt
+    (8.2 validation_check_1 — text reply completion)
+    (8.3 validation_check_2 — browser voice round trip)
+    (8.4 validation_check_3 — calendar action, happy + failure)
+- /job_site/demo_runbook.txt                (S6 Worker A)
+- /job_site/cloudflare_test_evidence_index.txt
+    (template for the runtime-evidence bundle used by CF-TEST)
+- /job_site/calendar_ui_contract.txt        (S4 Worker A)
+- /job_site/ui_stage4_direction.txt         (S5 Worker A)
 
-====================================================================
-0. ACCEPTED EVIDENCE SOURCES (per factory manual §14)
-====================================================================
-- attached file system (checked-in artifact)
-- exact repo URL (public GitHub commit / PR link)
-- attached archive
-- declared foreman handoff text
-- declared worker handoff text
+----------------------------------------------------------
+1. EVIDENCE BUNDLE LAYOUT
+----------------------------------------------------------
+Store every item below under a single folder named
+  stage4_evidence/<UTC-date>/
+with the following subfolders:
 
-All evidence collected below MUST map to one of these sources before
-Foreman B accepts it.
+  stage4_evidence/<UTC-date>/
+    pre_flight/
+    path_a_text/
+    path_b_voice/
+    path_c_calendar/
+    path_d_mobile/
+    manifest.txt      # paste this document + filled [x] gates
 
-====================================================================
-1. EVIDENCE INDEX — WHAT TO CAPTURE AND WHERE IT LIVES
-====================================================================
-Every captured artifact is filed under:
-    /job_site/stage2_demo_evidence/
-so it sits next to the rest of the run documentation. If the operator
-works from a non-local environment, each item is mirrored into the
-repo on the designated branch and referenced by commit URL.
+File-naming convention (strict — CF-VERIFY parses it):
+  <nn>_<short_description>.<ext>
+Examples:
+  01_health_probe.txt
+  02_ui_desktop_full.png
+  03_session_latest_two_pairs.json
 
-Filename convention (prefix = phase from runbook):
-    01_prereq_getwebhookinfo.json
-    02a_text_roundtrip_curl_response.json
-    02b_session_latest_after_text.json
-    03_telegram_client_reply.png
-    04a_voice_success_response.json             (if Deepgram configured)
-    04b_voice_noop_502_response.json            (default noop path)
-    05a_ui_loading.png
-    05b_ui_empty.png
-    05c_ui_live.png
-    05d_ui_error.png
-    06_fallback_matrix.json
-    07_worker_tail.log
+PNG > JPG for UI screenshots. MP4 or WEBM for the voice screen
+recording (≤ 30 s, ≤ 20 MB).
 
-====================================================================
-2. EVIDENCE ITEMS (each block = one required artifact)
-====================================================================
+----------------------------------------------------------
+2. PRE-FLIGHT EVIDENCE (EV-PF)
+----------------------------------------------------------
+Gate: /job_site/demo_runbook.txt §2.
+Satisfies: CF-TEST pass_condition 7.1 (routes respond), CF-VERIFY
+validator inputs.
 
-E-01  Webhook registration evidence
-      filename: 01_prereq_getwebhookinfo.json
-      captured by: curl getWebhookInfo (runbook §1.4)
-      required fields in captured JSON:
-        result.url                  == "<BASE>/telegram/webhook"
-        result.pending_update_count == 0
-        result.last_error_message   absent or empty
-      satisfies: build-sheet required_operator_checks
-        - "confirm Cloudflare route resolves"
-        - "confirm Access is not blocking required public endpoints"
-      validator: Foreman B — deploy path targets workers.dev, not a
-                 gated custom domain (see cloudflare_access_matrix §2).
+  EV-PF-1  pre_flight/01_health_probe.txt
+           Raw output of:
+             curl -s "$BASE/health" | jq '.'
+           Must show ok=true and a fresh boot_iso.
 
-E-02  Text round trip (synthetic)
-      filenames:
-        02a_text_roundtrip_curl_response.json
-        02b_session_latest_after_text.json
-      captured by: runbook §2.1 + §2.2
-      required assertions:
-        02a.ok == true
-        02a.handled == true
-        02a.event_id == "telegram:<sent update_id>"
-        02a.reply_message_id is a number
-        02b.ok == true
-        02b.items contains both:
-          { direction: "inbound",  text: "<sent text>" }
-          { direction: "outbound", text: "received: <sent text[0:200]>" }
-        02b.counts.inbound  >= 1
-        02b.counts.outbound >= 1
-      satisfies: build-sheet S2-CHECK pass_condition (one Telegram
-                 text message completes the webhook-normalize-reply
-                 round trip).
+  EV-PF-2  pre_flight/02_public_routes.txt
+           Raw output of the loop in runbook PF-2. Every listed
+           route must show HTTP 200.
 
-E-03  Text round trip (real Telegram client)
-      filename: 03_telegram_client_reply.png
-      captured by: runbook §3.1-§3.3
-      required content in screenshot:
-        - operator's outbound message visible ("hello from telegram")
-        - bot reply visible ("received: hello from telegram")
-        - Telegram timestamp visible and within demo window
-      satisfies: build-sheet S2-CHECK under real Telegram traffic
-                 (not just curl-synthetic).
+  EV-PF-3  pre_flight/03_ui_desktop_full.png
+           Full-viewport desktop screenshot of $BASE/ with status
+           bar, both panes, voice footer visible. No calendar
+           drawer open.
 
-E-04  Voice intake outcome
-      MUST capture exactly one of the two acceptable variants:
-        (a) with transcription provider configured (preferred):
-            filename: 04a_voice_success_response.json
-            captured by: runbook §4.2(a) plus /session/latest poll
-            required assertions:
-              webhook response: ok:true, handled:true,
-                                event_id, reply_message_id
-              /session/latest items include:
-                inbound  kind:"voice", text:"<transcript>"
-                outbound kind:"text",  text:"transcribed: <transcript>"
-        (b) without provider (demo-safe failure variant):
-            filename: 04b_voice_noop_502_response.json
-            captured by: runbook §4.2(b)
-            required assertions:
-              webhook response:
-                status == 502
-                body.ok == false
-                body.handled == true
-                body.stage == "transcription"
-                body.provider == "noop"
-                body.reason == "no transcription provider configured"
-                body.retryable == false
-              /session/latest items include:
-                inbound kind:"voice", text: null
-              no outbound item for this event_id.
-      satisfies: build-sheet S4-CHECK pass_condition (voice enters
-                 the same normalized pipeline as text or is safely
-                 and readably rejected).
+----------------------------------------------------------
+3. PATH A — TEXT REPLY COMPLETION (EV-A)
+----------------------------------------------------------
+Gate: /job_site/demo_runbook.txt §3.
+Satisfies: build-sheet 8.2 validation_check_1.
 
-E-05  Operator UI state walk
-      filenames:
-        05a_ui_loading.png   — panes show "loading…"; marker "loading"
-        05b_ui_empty.png     — "no inbound messages yet" /
-                               "no assistant replies yet"
-        05c_ui_live.png      — transcript + response populated;
-                               marker "last event Ns ago"
-        05d_ui_error.png     — marker "error: ..."; panes retain
-                               prior content
-      capture rules:
-        - every screenshot includes the status bar
-          (#status-core, #status-state, #last-event-marker).
-        - 05c must show at least one inbound AND one outbound entry.
-        - 05d must be produced by intentionally breaking the data
-          source (see runbook §5.2 ERROR instructions).
-      satisfies: build-sheet S3-CHECK pass_condition (UI visibly
-                 reflects the live loop; no dead empty panes).
+  EV-A-1   path_a_text/01_after_message_1.png
+           UI screenshot immediately after runbook step A-2.
+           Must clearly show the first inbound entry and the
+           matching outbound reply rendered in full.
 
-E-06  Fallback matrix
-      filename: 06_fallback_matrix.json
-      captured by: runbook §6.1-§6.11 (one response each,
-                   concatenated into a single JSON array with
-                   { step, status, body } entries).
-      minimum coverage required for PASS:
-        * one 403  (wrong secret)
-        * one 400  (bad json OR missing update_id)
-        * one 200  { reason: "no_message" }         (§6.4)
-        * one 200  { reason: "kind:other" }         (§6.5)
-        * one 502  reason: "duration_too_long"      (§6.6)
-        * one 502  reason: "size_too_large"         (§6.7)
-        * one 404  on an unknown path               (§6.11)
-      satisfies: build-sheet S5-CHECK pass_condition (failures are
-                 visible, not silent) and voice_failure_modes.txt
-                 safety invariants I-1..I-4.
+  EV-A-2   path_a_text/02_after_message_2.png
+           UI screenshot after runbook step A-4. Must show both
+           inbound/outbound pairs visible in their respective
+           panes.
 
-E-07  Cloudflare runtime evidence
-      filenames:
-        07_worker_tail.log                — output of `npx wrangler tail`
-                                            during the golden-path run
-        07_cloudflare_dashboard.png       — workers.cloudflare.com
-                                            deployment page showing
-                                            the "ali-ai" Worker active
-      required content:
-        - tail log contains at least one request line per evidence
-          item above (webhook POSTs and /session/latest GETs).
-        - dashboard screenshot shows the deployed version active on
-          the workers.dev subdomain (per cloudflare_prep_report §6).
-      satisfies: build-sheet accepted_validation_evidence:
-        - cloudflare_dashboard_screenshot
-        - deployed_route_screenshot
+  EV-A-3   path_a_text/03_session_latest_two_pairs.json
+           Raw output of:
+             curl -s "$BASE/session/latest" \
+               | jq '{session_id,last_event_at,
+                      event_count: (.events|length),
+                      directions: [.events[].direction],
+                      kinds: [.events[].kind]}'
+           Must show event_count >= 4 and at least 2 outbound
+           entries with non-empty text.
 
-====================================================================
-3. MAPPING TO BUILD-SHEET GATES
-====================================================================
-  build-sheet gate                 required evidence
-  -------------------------------  ----------------------------
-  S2-CHECK                         E-02, E-03
-  S3-CHECK                         E-02 (items), E-05 (all 4)
-  S4-CHECK                         E-04 (either variant)
-  S5-CHECK                         E-06 (fallback matrix)
-  CF-TEST-CHECK                    E-01, E-07, any one of
-                                   E-02 / E-03 / E-04 live response
-  CF-VERIFY-CHECK                  E-01, E-07, E-05
-  S6-CHECK                         ALL (E-01 through E-07)
+Acceptable alternates: none. If only EV-A-1 is possible (e.g.
+single-message proof), mark validation_check_1 as PATCH and
+return to S2.
 
-====================================================================
-4. FORMAT RULES
-====================================================================
-- JSON evidence MUST be valid JSON (no HTML wrapper, no curl meta).
-  If a response is non-JSON, record it as { "raw": "<text>" }.
-- PNG evidence MUST be full-pane screenshots, not cropped snippets,
-  so the status bar and pane headers stay visible.
-- Every evidence file MUST include a timestamp within the screenshot
-  or as a sibling JSON file with { "captured_at": "<ISO8601>" }.
-- No evidence file may contain live secrets (BOT_TOKEN, HOOK_SECRET,
-  DEEPGRAM_API_KEY). Redact to "<REDACTED>" before committing.
-- Redactions must be visible in the screenshot (opaque bar), not
-  cropped away, so the reviewer can confirm a field existed.
+----------------------------------------------------------
+4. PATH B — BROWSER VOICE ROUND TRIP (EV-B)
+----------------------------------------------------------
+Gate: /job_site/demo_runbook.txt §4.
+Satisfies: build-sheet 8.3 validation_check_2.
 
-====================================================================
-5. DELIVERY
-====================================================================
-Single artifact index file at:
-    /job_site/stage2_demo_evidence/INDEX.txt
-that lists:
-    file | E-xx | captured_at | checksum_sha256
-This index is what Foreman B reads first. Missing index == PATCH.
+  EV-B-1   path_b_voice/01_recording.png
+           UI screenshot during runbook step B-2 showing:
+             - #voice-status-badge data-state="recording"
+             - "Stop & Send" button visible
+             - #voice-message reads
+               "Recording — press Stop & Send when done."
 
-====================================================================
-6. EVIDENCE CHECKLIST (print, tick as you go)
-====================================================================
-  [ ] E-01 getWebhookInfo JSON captured
-  [ ] E-02a synthetic text webhook JSON captured
-  [ ] E-02b /session/latest JSON captured post-text
-  [ ] E-03 Telegram client reply screenshot captured
-  [ ] E-04 voice outcome (variant a OR variant b) captured
-  [ ] E-05a UI loading screenshot captured
-  [ ] E-05b UI empty screenshot captured
-  [ ] E-05c UI live screenshot captured
-  [ ] E-05d UI error screenshot captured
-  [ ] E-06 fallback matrix JSON captured (>= 7 steps)
-  [ ] E-07 wrangler tail log captured
-  [ ] E-07 Cloudflare dashboard screenshot captured
-  [ ] INDEX.txt written at /job_site/stage2_demo_evidence/INDEX.txt
-  [ ] all secrets redacted in every file
+  EV-B-2   path_b_voice/02_sent_with_voice_entry.png
+           UI screenshot after step B-5 showing:
+             - #voice-status-badge data-state="sent"
+             - an inbound entry with the "🎙 voice" kind badge
+             - a matching outbound reply body
 
-Any unchecked row at CF-TEST handoff = PATCH.
+  EV-B-3   path_b_voice/03_session_has_voice.json
+           Raw output of:
+             curl -s "$BASE/session/latest" \
+               | jq '{voice_events:
+                       [.events[]|select(.kind=="voice")],
+                      voice_count:
+                       ([.events[]|select(.kind=="voice")]|length)}'
+           Must show voice_count >= 1.
+
+  EV-B-4   path_b_voice/04_roundtrip.mp4  (or .webm)
+           ≤ 30 s screen recording of the idle → recording →
+           processing → sent cycle followed by the inbound voice
+           entry and outbound reply appearing. Required; no
+           acceptable still-image alternate.
+
+Acceptable partial proof: if the primary device cannot capture
+audio at all, substitute EV-B-5 below (denied or unsupported
+state screenshot). The bundle must STILL contain EV-B-1..4 from
+a different supported device.
+
+  EV-B-5   path_b_voice/05_fallback_state.png  (optional)
+           Screenshot showing #voice-status-badge with
+           data-state="denied" or "unsupported" and
+           #voice-message carrying the exact guidance string.
+
+----------------------------------------------------------
+5. PATH C — CALENDAR ACTION (EV-C)
+----------------------------------------------------------
+Gate: /job_site/demo_runbook.txt §5.
+Satisfies: build-sheet 8.4 validation_check_3.
+
+Happy path (CALENDAR_PROVIDER="demo"):
+
+  EV-C-1   path_c_calendar/01_drawer_ready.png
+           UI screenshot of the calendar drawer open with:
+             - #calendar-panel-state pill reads "configured · ready"
+               (green)
+             - #calendar-panel-provider reads "demo"
+             - guidance block hidden
+             - Run button enabled
+
+  EV-C-2   path_c_calendar/02_drawer_result_ok.png
+           UI screenshot after step C-2 showing:
+             - result state pill "ok" (green)
+             - reply_text listing 3 demo events with bullet
+               markers and hh:mm–hh:mm ranges
+             - meta line "handled_at <ISO> · 3 events"
+
+  EV-C-3   path_c_calendar/03_status_run_ok.json
+           Raw output of:
+             curl -s "$BASE/calendar/status?run=1" \
+               | jq '.'
+           Must show invocation.ok=true, event_count=3,
+           action.registered=true.
+
+Safe failure (CALENDAR_PROVIDER empty):
+
+  EV-C-4   path_c_calendar/04_drawer_unconfigured.png
+           UI screenshot of the drawer after step C-4 showing:
+             - #calendar-panel-state pill reads "unconfigured"
+               (amber)
+             - guidance block visible with the demo-mode text
+             - Run button still enabled
+
+  EV-C-5   path_c_calendar/05_drawer_result_fail.png
+           UI screenshot after step C-5 showing:
+             - result state pill "fail" (red)
+             - reply_text naming CALENDAR_PROVIDER
+             - meta line contains "error.code provider_not_ready"
+
+  EV-C-6   path_c_calendar/06_status_run_unconfigured.json
+           Raw output of the same curl as EV-C-3 but with the
+           env flipped. Must show invocation.ok=false,
+           provider.reason="provider_not_configured",
+           HTTP status 200.
+
+----------------------------------------------------------
+6. PATH D — MOBILE CHECK (EV-D)
+----------------------------------------------------------
+Gate: /job_site/demo_runbook.txt §6.
+Satisfies: build-sheet S5 pass_condition (UI mobile-usable).
+
+  EV-D-1   path_d_mobile/01_chat_stacked.png
+           Phone screenshot (portrait, real device or
+           iPhone 14 Pro emulation) of $BASE/ showing stacked
+           Transcript-above / Assistant-Response-below layout
+           with the voice footer pinned at the bottom.
+
+  EV-D-2   path_d_mobile/02_calendar_fullscreen.png
+           Phone screenshot with the calendar drawer open
+           full-screen; Close (×) visible in the top-right.
+
+  EV-D-3   path_d_mobile/03_voice_recording.png
+           Phone screenshot during a mobile voice capture
+           (badge "recording", Stop & Send button visible as an
+           icon-only or label button depending on viewport
+           width).
+
+At least one of EV-D-1..3 MUST be captured from a real device
+(not dev-tools emulation) to satisfy the mobile pass condition.
+
+----------------------------------------------------------
+7. EVIDENCE → VALIDATION-CHECK MATRIX
+----------------------------------------------------------
+build-sheet                      required evidence items
+-------------------------------  -----------------------------------
+8.2  text reply completion       EV-A-1, EV-A-2, EV-A-3
+8.3  browser voice round trip    EV-B-1, EV-B-2, EV-B-3, EV-B-4
+8.4  calendar action             EV-C-1, EV-C-2, EV-C-3,
+                                 EV-C-4, EV-C-5, EV-C-6
+S5   UI mobile-usable            EV-D-1, EV-D-2, EV-D-3
+CF-TEST routes respond           EV-PF-1, EV-PF-2
+CF-TEST UI reachable             EV-PF-3
+
+Absence of any row item is a CF-VERIFY PATCH back to the owning
+stage foreman.
+
+----------------------------------------------------------
+8. MANIFEST FORMAT
+----------------------------------------------------------
+stage4_evidence/<UTC-date>/manifest.txt MUST contain:
+
+  1. Pasted contents of this document with each EV-* line marked
+     [x] when captured, [ ] when skipped, with one-line reason
+     for any skips.
+  2. The deployed worker commit SHA used for the demo
+     (git rev-parse HEAD on the deployed branch).
+  3. The Cloudflare account subdomain used (BASE URL).
+  4. The wrangler version used for deploy.
+  5. The browser + OS + device used for each of path A, B, C, D.
+
+This manifest is the single artifact Foreman B presents to
+Factory Control Interface when opening S7 final checksum.
+
+----------------------------------------------------------
+9. ACCEPTANCE GATES (for S6 Worker A checkpoint)
+----------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] /job_site/demo_evidence_requirements.txt exists (this file).
+  [ ] Every EV-* item above has a path, a format, and a stated
+      source runbook step.
+  [ ] The mapping in section 7 covers every Stage 4 validation
+      check without gaps.
+
+PATCH conditions (any one fails):
+  [ ] EV-* item references a route or secret that is not in the
+      Stage 4 config.
+  [ ] A validation_check has zero listed EV-* items.
+  [ ] Evidence would require tribal knowledge to capture
+      (e.g. "screenshot the usual result") rather than a
+      reproducible runbook step.
+
+----------------------------------------------------------
+10. ARTIFACT SELF-CHECK
+----------------------------------------------------------
+expected_artifact_1: /job_site/demo_runbook.txt                — present (companion)
+expected_artifact_2: /job_site/demo_evidence_requirements.txt  — present (this file)
+repo_mirror_required: no
+commit_required:      no
+push_required:        no
+
+----------------------------------------------------------
+11. ISSUES / FLAGS
+----------------------------------------------------------
+- EV-B-4 (screen recording) may be blocked on locked-down
+  operator machines. If the recording cannot be produced,
+  capture EV-B-1 through EV-B-3 on a different device and note
+  the substitution in manifest.txt.
+- The Stage 4 build sheet does not declare an upload location
+  for the evidence bundle. Keep it local under
+  /stage4_evidence/<UTC-date>/ and reference that path from
+  CF-TEST / CF-VERIFY artifacts.
+- Screenshots of UI state rely on the DOM hooks pinned in
+  /job_site/calendar_ui_contract.txt and
+  /job_site/ui_stage4_direction.txt. If a later stage renames
+  a hook, re-capture the affected EV-* items.
