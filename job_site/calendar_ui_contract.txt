@@ -1,0 +1,307 @@
+CALENDAR UI CONTRACT — EXEC-AI-STAGE4-001 | S4 | WORKER A
+=============================================================
+Generated: 2026-04-18
+Branch:    claude/add-calendar-settings-3iOUJ
+Scope:     Operator-facing calendar settings surface in
+           /apps/operator-shell/src/ui/ that exposes provider
+           readiness, demo-mode guidance, one action trigger path
+           (calendar.list_today), and readable configured /
+           unconfigured states.
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/Build Sheet — EXEC-AI-STAGE4-001.txt (S4 worker_a_order)
+- /job_site/calendar_demo_checklist.txt
+- /job_site/calendar_failure_modes.txt
+- /worker-wb/src/integrations/calendar/provider.ts
+- /worker-wb/src/integrations/calendar/index.ts
+- /worker-wb/src/routes/calendar-status.ts
+- /apps/operator-shell/src/ui/session-view.js   (Stage 3 calendar polling)
+- /apps/operator-shell/src/ui/session.contract.ts
+
+NOTE: Worker-side calendar mode is unchanged by Stage 4 Worker A.
+      The Worker surface (CALENDAR_LIST_TODAY, /calendar/status,
+      UnconfiguredCalendarProvider, DemoCalendarProvider) was frozen
+      in Stage 3 S4 and is consumed here as-is.
+
+----------------------------------------------------------
+1. STAGE 4 S4 WORKER A SCOPE LOCK
+----------------------------------------------------------
+Build sheet 6.6.3.1:
+  "Add a simple calendar mode or settings surface that exposes
+   provider status, demo-mode guidance, one action trigger path,
+   and readable unconfigured/configured states."
+
+IN-SCOPE (this contract pins exactly these):
+
+  L1. A single calendar settings drawer, opened from the status bar,
+      that renders:
+        - provider name + readiness
+        - not-ready reason + detail (when not ready)
+        - demo-mode guidance copy (when not ready)
+        - one action trigger button (calendar.list_today)
+        - last invocation result (ok / fail + reply_text + meta)
+        - a single route-error line
+
+  L2. Exactly one action trigger path:
+        POST UI click -> GET /calendar/status?run=1
+      No other calendar actions exist in the UI. No CRUD.
+
+  L3. Exactly two authoritative operator states shown in the pill:
+        "configured"   (ready)
+        "unconfigured" (unconfigured OR unsupported OR not_ready)
+      For operator clarity the pill also surfaces "unsupported" and
+      "not ready" as sub-labels, but every non-ready state maps to
+      the unconfigured branch of guidance.
+
+  L4. No provider switching, no secret editing, no credential input
+      from the UI. All configuration continues to flow through
+      Cloudflare wrangler secrets.
+
+OUT-OF-SCOPE (rejected for Stage 4 Worker A):
+  - Multi-action calendar scheduling.
+  - Event create / update / delete.
+  - Calendar drill-down list views.
+  - Provider picker UI.
+  - Secret / API-key input fields.
+  - Any change to /worker-wb code or routes.
+
+----------------------------------------------------------
+2. ARTIFACTS
+----------------------------------------------------------
+Added / modified by Worker A (Stage 4 S4):
+
+  A1. /apps/operator-shell/src/ui/calendar-panel.js        (new)
+      State classifier + drawer controller + render functions
+      for the calendar settings surface.
+
+  A2. /apps/operator-shell/src/ui/index.html               (modified)
+      - Status-bar toggle button: #calendar-panel-toggle
+      - Drawer markup: #calendar-panel and all cp-* hooks
+      - Module script tag for calendar-panel.js
+      - Additive CSS (no changes to existing panes / voice footer)
+
+  A3. /apps/operator-shell/src/ui/session.contract.ts      (modified)
+      Added CalendarUIState, CalendarProviderStatusView,
+      CalendarActionRegistrationView, CalendarInvocationView,
+      CalendarStatusResponseView, CalendarPanelModel.
+
+  A4. /job_site/calendar_ui_contract.txt                   (this file)
+
+Unchanged and still authoritative (Stage 3 contracts hold):
+  - /worker-wb/src/integrations/calendar/provider.ts
+  - /worker-wb/src/integrations/calendar/index.ts
+  - /worker-wb/src/routes/calendar-status.ts
+
+----------------------------------------------------------
+3. CLOSED UI-STATE ENUM (CalendarUIState)
+----------------------------------------------------------
+The drawer branches on CalendarUIState, NOT on free-text reasons.
+These are the only legal values; the renderer must never read a
+provider `reason` string directly.
+
+  unknown       — /calendar/status has not been fetched yet
+                  (initial paint before first fetch completes)
+
+  ready         — provider.ready === true
+                  Drawer renders provider name + "configured · ready",
+                  no guidance, action button enabled, last invocation
+                  rendered if present.
+
+  not_ready     — provider.ready === false AND
+                  provider.reason is NOT "provider_not_configured"
+                  AND is NOT "provider_unsupported"
+                  (e.g. upstream_error from an otherwise-named
+                  provider). Drawer shows "configured · not ready"
+                  and the re-try guidance block.
+
+  unconfigured  — provider.reason === "provider_not_configured"
+                  Drawer shows "unconfigured" pill + the demo-mode
+                  guidance string naming the wrangler secret to set.
+
+  unsupported   — provider.reason === "provider_unsupported"
+                  Drawer shows "unsupported provider" pill + guidance
+                  telling operator to set CALENDAR_PROVIDER=demo or
+                  leave it empty.
+
+  error         — /calendar/status unreachable, non-200, or malformed
+                  Drawer shows "unreachable" pill + the route-error
+                  guidance. Action button stays enabled so the
+                  operator can retry; a repeat failure renders as a
+                  fresh error line.
+
+----------------------------------------------------------
+4. CLASSIFY CONTRACT (pinned)
+----------------------------------------------------------
+calendar-panel.js exports classifyStatus(data) -> CalendarUIState
+with this decision tree:
+
+  data == null || data.provider missing           -> error
+  data.provider.ready === true                    -> ready
+  data.provider.reason === "provider_not_configured"
+                                                  -> unconfigured
+  data.provider.reason === "provider_unsupported"
+                                                  -> unsupported
+  otherwise                                       -> not_ready
+
+This is the sole translation from provider-level
+CalendarFailureReason (see /worker-wb/src/integrations/calendar/
+provider.ts) into CalendarUIState. The UI never stringifies reason
+values directly into pill copy.
+
+----------------------------------------------------------
+5. DOM HOOKS (PIN; do not rename)
+----------------------------------------------------------
+Status bar:
+  #calendar-panel-toggle         — button that opens/closes drawer
+                                    aria-expanded = true when open
+  #status-calendar               — already present (Stage 3), kept
+
+Drawer container:
+  #calendar-panel                — aside, aria-hidden toggles
+  #calendar-panel-close          — X button
+  #calendar-panel-state          — pill; dataset.state = CalendarUIState
+  #calendar-panel-provider       — provider name
+  #calendar-panel-reason         — not-ready reason line (hidden when ready)
+  #calendar-panel-detail         — not-ready detail line (hidden when ready)
+  #calendar-panel-guidance       — guidance block (hidden when ready)
+  #calendar-panel-action-type    — label "calendar.list_today"
+  #calendar-panel-run            — trigger button
+  #calendar-panel-result         — container (hidden until first result)
+  #calendar-panel-result-state   — "ok" / "fail" pill
+  #calendar-panel-result-reply   — invocation.reply_text body
+  #calendar-panel-result-meta    — handled_at / event count / error.code
+  #calendar-panel-error          — single route-error line
+
+These names are the public DOM contract; tests and any downstream
+UI polish passes may rely on their stability.
+
+----------------------------------------------------------
+6. GUIDANCE COPY (PIN)
+----------------------------------------------------------
+The guidance strings are pinned here so Stage 5 (UI completion) does
+not drift them.
+
+  unconfigured:
+    "No calendar provider is wired. For the demo set the
+     CALENDAR_PROVIDER secret to \"demo\" with: wrangler secret put
+     CALENDAR_PROVIDER."
+
+  unsupported:
+    "CALENDAR_PROVIDER is set to a name the worker does not
+     recognise. Set it to \"demo\" for the Stage 4 demo or leave it
+     empty to disable."
+
+  not_ready:
+    "Calendar provider is named but not ready. Check provider
+     credentials and try again — the single action is safe to
+     re-run."
+
+  error:
+    "Could not reach /calendar/status. Verify the worker is deployed
+     and that Cloudflare Access does not gate this public route."
+
+  ready: (no guidance — operator is already good to go)
+  unknown: (no guidance — pre-first-fetch)
+
+----------------------------------------------------------
+7. ACTION TRIGGER PATH (exactly one)
+----------------------------------------------------------
+User clicks #calendar-panel-run.
+  1. Button is disabled.
+  2. GET /calendar/status?run=1 is issued (fetch, no-store, JSON).
+  3. On 2xx: renderPanelState() is called on the fresh status; then
+     renderPanelInvocation(data.invocation) is called to show the
+     just-run result.
+  4. On 4xx / 5xx / network error: #calendar-panel-error shows
+     "Run failed: <message>" and the drawer state pill flips to
+     "unreachable" (error). No exception bubbles to the window.
+  5. Button is re-enabled.
+
+No other calendar request path exists in the UI. The passive poll
+in session-view.js continues to call GET /calendar/status (no run)
+every 5 s; the drawer refreshes via its own call on open.
+
+----------------------------------------------------------
+8. UNCONFIGURED vs CONFIGURED VISIBLE DIFFERENCES
+----------------------------------------------------------
+These are the readable differences an operator sees WITHOUT opening
+devtools or reading network traffic:
+
+  configured (ready):
+    - #status-calendar reads "<provider> ready" in green
+    - #calendar-panel-state pill is green and reads
+      "configured · ready"
+    - Guidance block is hidden
+    - Run button is enabled
+    - After one click, result pill is green "ok" with reply_text
+      listing today's events and meta "N events"
+
+  unconfigured:
+    - #status-calendar reads "<provider> not ready" in red
+    - #calendar-panel-state pill is amber and reads "unconfigured"
+    - Guidance block is visible with the demo-mode instruction
+    - Run button is enabled (fails safely)
+    - After one click, result pill is red "fail" with the canned
+      reply_text naming CALENDAR_PROVIDER and meta
+      "error.code provider_not_ready"
+
+These two surfaces are the "readable unconfigured/configured states"
+required by the S4 pass condition.
+
+----------------------------------------------------------
+9. ACCESSIBILITY & RESPONSIVE
+----------------------------------------------------------
+  - The drawer uses <aside role implied>, aria-hidden toggles with
+    open state, aria-label="Calendar settings".
+  - The toggle button uses aria-controls="calendar-panel" and
+    aria-expanded=true|false.
+  - The state pill, reply body, and error line are static text
+    nodes — screen readers get the full reply_text on each run.
+  - At viewport width <= 640 px the drawer becomes full-screen
+    (width: 100vw, border-left removed) so mobile operators can
+    still read reply_text without horizontal scrolling.
+  - No keyboard-trap; Tab order reaches the drawer buttons and
+    returns to the page. Escape-to-close is deliberately NOT
+    added here to keep S4 scope minimal; may be layered in S5.
+
+----------------------------------------------------------
+10. ACCEPTANCE GATES (for S4 Worker A checkpoint)
+----------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] /apps/operator-shell/src/ui/calendar-panel.js present with
+      classifyStatus, renderPanelState, renderPanelInvocation,
+      refreshStatus, triggerAction exports.
+  [ ] /apps/operator-shell/src/ui/index.html contains
+      #calendar-panel-toggle and #calendar-panel with all DOM hooks
+      listed in section 5.
+  [ ] /apps/operator-shell/src/ui/session.contract.ts declares
+      CalendarUIState and CalendarStatusResponseView.
+  [ ] /job_site/calendar_ui_contract.txt exists (this file).
+  [ ] The drawer surfaces provider status + demo-mode guidance
+      + one action trigger + configured/unconfigured visibility.
+  [ ] No change to /worker-wb/src/integrations/calendar/* or
+      /worker-wb/src/routes/calendar-status.ts.
+  [ ] Repo mirrored, committed, pushed to
+      claude/add-calendar-settings-3iOUJ.
+
+PATCH conditions (any one fails):
+  [ ] Drawer invents a second action type.
+  [ ] Guidance strings diverge from section 6 copy.
+  [ ] CalendarUIState enum adds a seventh value or drops one.
+  [ ] UI calls a route other than /calendar/status[?run=1].
+  [ ] Worker-side calendar files are modified by this worker.
+  [ ] Provider reason strings are rendered directly into the pill
+      bypassing classifyStatus.
+
+----------------------------------------------------------
+11. ARTIFACT SELF-CHECK
+----------------------------------------------------------
+expected_artifact_1: /apps/operator-shell/src/*               — present
+                     (calendar-panel.js, updated index.html,
+                      updated session.contract.ts)
+expected_artifact_2: /job_site/calendar_ui_contract.txt        — present (this file)
+repo_mirror_required: yes — written to /home/user/ALI-ai working tree
+commit_required:      yes — to be committed on claude/add-calendar-settings-3iOUJ
+push_required:        yes — to be pushed to origin
