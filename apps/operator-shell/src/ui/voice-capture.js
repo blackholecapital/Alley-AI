@@ -72,7 +72,7 @@ async function startCapture() {
 
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
     const name = err && err.name;
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
