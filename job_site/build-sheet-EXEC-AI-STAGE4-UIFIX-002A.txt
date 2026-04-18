@@ -1,0 +1,174 @@
+BUILD SHEET
+
+form_id: BUILD-SHEET-STANDARD-SHORT-v3
+form_name: BROWSER CHAT PATH FIX — EXEC-AI-STAGE4-UIFIX-002A
+
+1. JOB
+   1.1 job_id: EXEC-AI-STAGE4-UIFIX-002A
+   1.2 job_name: Executive AI Assistant Stage 4 — Browser Chat Path Unification (Follow-up to 002 S3)
+   1.3 objective: Lock /ui/send as the single canonical browser chat route, remove any conflicting
+       placeholder path behavior, and ensure the live UI returns one deterministic non-placeholder
+       assistant response independent of voice and transcription providers.
+   1.4 requested_outcome: /ui/send is confirmed as the one browser chat path; all stale references
+       to /telegram/webhook as a browser send path are removed; generateAssistantReply() is confirmed
+       deterministic with no external service dependency; deployed session-view.js matches source.
+   1.5 target_root_path: /worker-wb/src/routes
+   1.6 target_repo_url: https://github.com/blackholecapital/ALI-ai
+   1.7 inspection_url: https://github.com/blackholecapital/ALI-ai/tree/main
+
+2. RUN CONTROL
+   2.1 mode: single
+   2.2 execution_foreman: Foreman A
+   2.3 checksum_foreman: Foreman B
+   2.4 final_validator: Factory Control Interface
+
+3. TAG FORMAT
+   3.1 foreman_header
+   3.1.1 job_id:
+   3.1.2 foreman:
+   3.1.3 current_stage:
+   3.1.4 current_pass:
+   3.1.5 next_stage:
+   3.1.6 next_owner:
+   3.1.7 passes_remaining:
+   3.1.8 status:
+   3.1.9 current_action:
+
+3.2 worker_tag_format
+3.2.1 [PROJECT | WORKER | STAGE | RESULT]
+
+4. PATHS
+   4.1 stage_activity_log: /job_site/stage_activity_log.txt
+   4.2 final_checksum_path: /job_site/final_checksum.txt
+   4.3 final_tps_report: /job_site/TPS_REPORT.txt
+
+5. REFERENCES
+   5.1 required_references:
+   5.1.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+   5.1.2 /job_site/ui_shell_contract.txt
+   5.1.3 /job_site/browser_chat_route_contract.txt
+   5.1.4 /job_site/ui_failure_lock.txt
+   5.2 external_references:
+   5.2.1 https://github.com/blackholecapital/ALI-ai
+
+6. STAGE
+   6.1 stage_id: S3
+   6.2 stage_name: Browser Chat Route Unification (002A follow-up)
+   6.3 stage_owner: Worker A
+   6.4 stage_goal: Select one browser chat path only (/ui/send), remove conflicting placeholder
+       comments referencing /telegram/webhook as the browser send path, and confirm the route
+       returns a real assistant reply independent of voice/transcription providers.
+   6.5 stage_inputs:
+   6.5.1 worker-wb/src/routes/ui-send.ts
+   6.5.2 worker-wb/public/session-view.js (deployed)
+   6.5.3 apps/operator-shell/src/ui/session-view.js (source)
+   6.5.4 job_site/browser_chat_route_contract.txt
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002A | WORKER A | S3 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Remove stale /telegram/webhook comments from worker-wb/public/session-view.js that
+        conflict with the locked /ui/send browser path.
+6.6.3.2 Sync worker-wb/public/session-view.js to match apps/operator-shell/src/ui/session-view.js
+        (repo_mirror_required).
+6.6.3.3 Update browser_chat_route_contract.txt with S3 PASS confirmation and evidence.
+6.6.3.4 Confirm ui-send.ts has no dependency on voice/transcription providers.
+6.6.4 expected_artifacts:
+6.6.4.1 /worker-wb/src/routes/ui-send.ts
+6.6.4.2 /job_site/browser_chat_route_contract.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
+6.6.5.2 /job_site/ui_shell_contract.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.8 required_stage_artifacts:
+6.8.1 /worker-wb/src/routes/ui-send.ts
+6.8.2 /job_site/browser_chat_route_contract.txt
+6.9 checkpoint_id: S3-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition:
+       - SEND_ENDPOINT = '/ui/send' confirmed in session-view.js (source and deployed)
+       - No stale /telegram/webhook comments remain in deployed session-view.js
+       - generateAssistantReply() is deterministic with no transcription provider dependency
+       - ui-send.ts handler verified: inbound record → reply → outbound record → {ok, reply_text}
+       - deployed mirror (worker-wb/public/) matches canonical source (apps/operator-shell/src/ui/)
+   7.2 patch_condition: Stale /telegram/webhook references remain, session-view.js deployed ≠ source,
+       or ui-send.ts calls any voice/transcription service.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S4
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S3
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. FINAL VALIDATION
+   8.1 required_inputs:
+   8.1.1 /worker-wb/src/routes/ui-send.ts
+   8.1.2 /job_site/browser_chat_route_contract.txt
+   8.2 validation_check_1: /ui/send is sole browser chat path — no other route handles browser text send.
+   8.3 validation_check_2: No placeholder echo logic; generateAssistantReply returns real assistant reply.
+   8.4 validation_check_3: Route has zero dependency on transcription/voice provider env vars.
+   8.5 outputs:
+   8.5.1 completion_status
+   8.6 completion_status: COMPLETE on PASS
+
+9. FOREMAN OUTPUT FORM
+   9.1 job_id:
+   9.2 foreman:
+   9.3 current_stage:
+   9.4 current_pass:
+   9.5 next_stage:
+   9.6 next_owner:
+   9.7 passes_remaining:
+   9.8 status:
+   9.9 current_action:
+   9.10 artifacts:
+   9.11 checkpoint_result:
+   9.12 handoff_instruction:
+   9.13 issue:
+
+10. WORKER DISPATCH FORM
+    10.1 [PROJECT | WORKER | STAGE | RESULT]
+    10.2 expected_status:
+    10.3 task:
+    10.4 expected_artifacts:
+    10.5 required_references:
+    10.6 repo_mirror_required:
+    10.7 commit_required:
+    10.8 push_required:
+
+11. WORKER RESULT FORM
+    11.1 [EXEC-AI-STAGE4-UIFIX-002A | WORKER A | S3 | RESULT]
+    11.2 status: PASS
+    11.3 artifacts:
+        /worker-wb/src/routes/ui-send.ts (verified, no changes required)
+        /job_site/browser_chat_route_contract.txt (updated with S3 PASS status)
+        /worker-wb/public/session-view.js (stale /telegram/webhook comments removed)
+        /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt (created)
+    11.4 summary:
+        Selected /ui/send as the single canonical browser chat path (already locked in S2).
+        Removed two stale comments in worker-wb/public/session-view.js that incorrectly
+        referenced /telegram/webhook as the browser send path — conflicting with SEND_ENDPOINT
+        = '/ui/send'. Deployed file now matches canonical source exactly.
+        Confirmed ui-send.ts calls generateAssistantReply() (deterministic, rule-based) with
+        no dependency on voice capture or transcription providers. Route returns a real assistant
+        reply on every turn; no placeholder or echo behavior present.
+    11.5 issues: none
+
+FORM LAW BLOCK
+L1. stage numbering must use S1, S2, S3 format only
+L2. field numbering must use 1.1, 1.2, 1.3 format only
+L3. foreman status values allowed: PASS | PATCH | ERROR
+L4. worker status values allowed: PASS | PATCH
+L5. unused fields must remain blank
+L6. do not delete fields from the template
+L7. all expected_artifacts must be exact target paths
+L8. worker dispatch tag must exactly match worker result tag format
+L9. required_references only in worker orders
+L10. all file writes must use declared target paths only

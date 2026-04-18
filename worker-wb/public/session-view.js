@@ -21,9 +21,10 @@
 
 // Worker-aligned routes. The UI must NOT call /api/* — those paths do not
 // exist on the Cloudflare Worker. Inbound events are read from
-// /session/latest and outbound messages post to /telegram/webhook. Both
-// routes live on the same worker origin and return {"ok": true} on success
-// for the POST path.
+// /session/latest and outbound messages post to /ui/send — the dedicated
+// browser send route that requires no Telegram secret header and returns
+// {ok, event_id, reply_text, inbound_item, outbound_item} on success.
+// /telegram/webhook is reserved for Telegram-origin requests only.
 const ENDPOINT = '/session/latest';
 const CALENDAR_ENDPOINT = '/calendar/status';
 const SEND_ENDPOINT = '/ui/send';
@@ -329,9 +330,9 @@ function stopPolling() {
 }
 
 // ── Outbound send ──────────────────────────────────────────────────
-// Posts to the Worker's /telegram/webhook route (the same route that
-// Telegram itself calls). The worker always returns {"ok": true} on
-// accepted posts — anything else is treated as a send failure.
+// Posts to the Worker's /ui/send route — the single canonical browser
+// send path. Returns {ok, event_id, reply_text, inbound_item, outbound_item}
+// on success; {ok: false} on any error. /telegram/webhook is Telegram-only.
 
 async function sendMessage(payload) {
   const res = await fetch(SEND_ENDPOINT, {

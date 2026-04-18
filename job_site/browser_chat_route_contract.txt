@@ -1,7 +1,8 @@
 BROWSER CHAT ROUTE CONTRACT
-job_id: EXEC-AI-STAGE4-UIFIX-002
+job_id: EXEC-AI-STAGE4-UIFIX-002A
 stage: S3
 produced_by: WORKER A
+status: PASS
 
 canonical_browser_send_route: /ui/send
 method: POST
@@ -19,11 +20,14 @@ reason_retired_for_browser: requires x-telegram-bot-api-secret-token header; bro
 assistant_reply_generator: generateAssistantReply() in worker-wb/src/routes/telegram-webhook.ts
   shared by both /ui/send and /telegram/webhook; no echo/placeholder logic
   every call returns a real assistant-voice reply
+  deterministic, rule-based — no external LLM, no transcription provider dependency
+  /ui/send does NOT call any voice or transcription service; reply is always generated locally
 
 ui_send_wiring:
   file: apps/operator-shell/src/ui/session-view.js
   constant: SEND_ENDPOINT = '/ui/send'
   function: sendMessage(payload) — POSTs to SEND_ENDPOINT, expects data.ok === true
+  deployed_mirror: worker-wb/public/session-view.js (in sync with source)
 
 worker_route_registration:
   file: worker-wb/src/index.ts
@@ -31,3 +35,9 @@ worker_route_registration:
   path: /ui/send
 
 pass_condition: browser text input → POST /ui/send → assistant reply recorded → visible in /session/latest poll
+s3_pass_evidence:
+  - SEND_ENDPOINT = '/ui/send' confirmed in both session-view.js source and deployed mirror
+  - stale /telegram/webhook comment removed from worker-wb/public/session-view.js
+  - generateAssistantReply() is deterministic; no transcription/voice provider dependency
+  - /ui/send handler has no dependency on voice capture or transcription env vars
+  - error path: inbound persisted, failure recorded, error envelope returned (no silent placeholder)
