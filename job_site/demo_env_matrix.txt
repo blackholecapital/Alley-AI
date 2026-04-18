@@ -1,24 +1,26 @@
-DEMO ENV MATRIX — EXEC-AI-STAGE3-004 | S6 | WORKER B
+DEMO ENV MATRIX — EXEC-AI-STAGE4-001 | S6 | WORKER B
 =====================================================
-Generated: 2026-04-17
-Branch:    claude/calendar-single-action-tests-o8NmW
+Generated: 2026-04-18
+Branch:    claude/calendar-action-paths-v68DY
 Scope:     Environment variables required or recognized by the worker-wb
-           Cloudflare Worker for the Stage 3 demo loop.
-           Extends Stage 2 matrix (EXEC-AI-STAGE2-003 S5 Worker A) with
-           CALENDAR_PROVIDER and CALENDAR_TIMEZONE_OFFSET_MINUTES.
-           Three demo paths covered: text, voice, calendar.
+           Cloudflare Worker for the Stage 4 demo loop.
+           Extends Stage 3 matrix (EXEC-AI-STAGE3-004 S6) with:
+             - POST /voice/capture (browser mic audio → transcription)
+             - /calendar/status ui block (Stage 4 S4 tightening)
+             - /session/latest pipeline block (Stage 4 S5 tightening)
+           Four demo paths covered: text, voice (Telegram), voice
+           (browser), calendar.
 
 References consulted:
-  /job_site/factory-manual-v1.11.txt  (active as v1.11 lean)
-  /job_site/worker-execution-manual-v1.1.txt
-  /job_site/build-sheet-EXEC-AI-STAGE3-004.txt
+  /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+  /job_site/demo_env_matrix.txt (Stage 3 predecessor)
   /worker-wb/src/lib/env.ts
   /worker-wb/src/integrations/calendar/provider.ts
+  /worker-wb/src/integrations/telegram/voice.ts
   /worker-wb/wrangler.jsonc
 
-NOTE: /job_site/factory-manual-v1.1.txt is on disk as
-      /job_site/factory-manual-v1.11.txt. Same active manual per
-      PRECEDENCE LAW; flag only.
+FLAG: /job_site/reference_repo_matrix.txt is listed as a required
+      reference in the build sheet but is not present on disk.
 
 ----------------------------------------------------------
 1. RUNTIME PATHS AND THEIR ENV DEPENDENCIES
@@ -30,14 +32,29 @@ NOTE: /job_site/factory-manual-v1.1.txt is on disk as
                DEEPGRAM_API_KEY          (secret, required when provider=deepgram)
                DEEPGRAM_MODEL            (var, default "nova-2")
 
-/session/latest
+/voice/capture                           [NEW — Stage 4]
+   requires:   TELEGRAM_BOT_TOKEN        (secret, for outbound reply)
+   optional:   TRANSCRIPTION_PROVIDER    (var)    "deepgram" | "noop"
+               DEEPGRAM_API_KEY          (secret, required when provider=deepgram)
+               DEEPGRAM_MODEL            (var, default "nova-2")
+   note:       Browser mic audio uploaded as multipart/form-data.
+               No TELEGRAM_WEBHOOK_SECRET required (not an inbound webhook).
+               Browser must grant microphone permission before capture starts.
+
+/session/latest                          [UPDATED — Stage 4 S5 pipeline block]
    requires:   (none)
    optional:   (none)
+   note:       Response now includes `pipeline` block with current_state,
+               current_label, updated_at, and trail[] (newest-first).
+               States: idle | received | replied | failed.
 
-/calendar/status
+/calendar/status                         [UPDATED — Stage 4 S4 ui block]
    requires:   (none — route always up; returns not-ready gracefully)
-   optional:   CALENDAR_PROVIDER               (var/secret)
+   optional:   CALENDAR_PROVIDER               (var/secret) "demo" only in Stage 4
                CALENDAR_TIMEZONE_OFFSET_MINUTES (var)
+   note:       Response now includes `ui` block with provider.state,
+               trigger.enabled, trigger.action_type, and last_result.
+               triggered_by discriminator: "none" | "get_run".
 
 /health
    requires:   (none)
@@ -52,18 +69,21 @@ NOTE: /job_site/factory-manual-v1.1.txt is on disk as
 KEY                              KIND     REQUIRED FOR               SEVERITY IF MISSING
 -------------------------------  -------  -------------------------  --------------------------
 TELEGRAM_BOT_TOKEN               secret   outbound sendMessage,      error — 500 config_error
-                                          voice media download        on /telegram/webhook
+                                          voice media download,       on /telegram/webhook and
+                                          /voice/capture reply path   /voice/capture reply path
 TELEGRAM_WEBHOOK_SECRET          secret   inbound webhook verify     error — 500 config_error
-                                                                       on /telegram/webhook
+                                                                       on /telegram/webhook only
+                                                                       (not required for
+                                                                       /voice/capture)
 TRANSCRIPTION_PROVIDER           var      provider selection         none when unset; voice path
                                           "deepgram" | "noop"         degrades to noop (readable
                                                                        failure message)
 DEEPGRAM_API_KEY                 secret   voice transcription        error when provider=deepgram;
-                                                                       warn when unset with no
-                                                                       explicit provider
+                                          (Telegram voice and         warn when unset with no
+                                          browser /voice/capture)     explicit provider
 DEEPGRAM_MODEL                   var      deepgram model tuning      none; defaults to "nova-2"
 CALENDAR_PROVIDER                var/     calendar action dispatch   none — /calendar/status
-                                 secret   "demo" only in Stage 3      returns provider_not_
+                                 secret   "demo" only in Stage 4      returns provider_not_
                                                                        configured; ok=false with
                                                                        human-readable reply;
                                                                        worker stays up
@@ -99,7 +119,7 @@ b) Plain vars (safe in wrangler.jsonc → "vars" block)
      ENVIRONMENT       = "development"
      WORKER_VERSION    = "0.1.0"
      LOG_LEVEL         = "info"
-     PROXY_BACKEND_URL = "http://localhost:5000"  (unused in Stage 3)
+     PROXY_BACKEND_URL = "http://localhost:5000"  (unused in Stage 4)
 
    Add as needed:
      TRANSCRIPTION_PROVIDER           = "deepgram"
@@ -114,13 +134,15 @@ b) Plain vars (safe in wrangler.jsonc → "vars" block)
 4. VALIDATION BEHAVIOR
 ----------------------------------------------------------
 src/lib/env.ts — validateTelegramEnv() / validateTranscriptionEnv():
-   Called per-request by /telegram/webhook. Returns EnvValidation
-   (ok:bool, errors:[], warnings:[]). Callers return 500 config_error
-   on any errors; warnings are logged but allow the request to proceed.
+   Called per-request by /telegram/webhook and /voice/capture.
+   Returns EnvValidation (ok:bool, errors:[], warnings:[]). Callers
+   return 500 config_error on any errors; warnings are logged but
+   allow the request to proceed.
 
    validateTelegramEnv:
      TELEGRAM_BOT_TOKEN missing       → error → 500 on /telegram/webhook
-     TELEGRAM_WEBHOOK_SECRET missing  → error → 500 on /telegram/webhook
+                                                  and /voice/capture reply path
+     TELEGRAM_WEBHOOK_SECRET missing  → error → 500 on /telegram/webhook only
 
    validateTranscriptionEnv:
      provider=deepgram + no API key   → error → 500 on voice path only
@@ -138,8 +160,15 @@ src/integrations/calendar/provider.ts — getCalendarProvider(env):
    /calendar/status always returns HTTP 200. Handler returns ok=false with
    human-readable reply_text when provider not ready. Isolate never crashes.
 
+   Stage 4 addition: every /calendar/status response includes a `ui` block
+   derived by buildCalendarUiView(providerStatus, lastResult):
+     ui.provider.state  ∈ ready | not_configured | unsupported | not_ready
+     ui.trigger.enabled = providerStatus.ready
+     ui.last_result     mirrors the most recent invocation result (persists
+                        across passive polls)
+
 ----------------------------------------------------------
-5. STAGE 3 DEMO CAPABILITY MATRIX
+5. STAGE 4 CAPABILITY MATRIX
 ----------------------------------------------------------
 CAPABILITY                        MINIMUM ENV REQUIRED
 --------------------------------  -------------------------------------------
@@ -147,31 +176,86 @@ Telegram text round trip          TELEGRAM_BOT_TOKEN
                                   TELEGRAM_WEBHOOK_SECRET
 
 UI session transcript             (none — always available)
-at /session/latest
+at /session/latest (with          Response includes pipeline block:
+pipeline block)                   current_state, trail[] (Stage 4 S5)
 
 Telegram voice → text pipeline    TELEGRAM_BOT_TOKEN
                                   TELEGRAM_WEBHOOK_SECRET
                                   DEEPGRAM_API_KEY
                                   (TRANSCRIPTION_PROVIDER=deepgram optional)
 
-Voice visible safe failure        TELEGRAM_BOT_TOKEN
+Telegram voice — safe failure     TELEGRAM_BOT_TOKEN
 (no transcription configured)     TELEGRAM_WEBHOOK_SECRET
                                   (voice records inbound, readable failure,
                                    UI shows voice badge with null text)
 
+Browser voice capture             (none — /voice/capture always reachable)
+at POST /voice/capture            TELEGRAM_BOT_TOKEN for reply path
+                                  DEEPGRAM_API_KEY for transcription
+                                  Browser microphone permission required
+                                  (client-side — not an env key)
+
+Browser voice — safe failure      (none for capture; reply path degrades)
+(mic denied or no transcription)  Browser permission denial → client-side
+                                  error badge; no Worker call made.
+                                  No DEEPGRAM_API_KEY → readable noop reply.
+
 Calendar action — happy path      CALENDAR_PROVIDER=demo
 (CALENDAR_LIST_TODAY)             (no external API key required)
+                                  Stage 4: ui.trigger.enabled=true,
+                                  ui.last_result.state=ok after ?run=1
 
 Calendar action — safe failure    (none — route always up;
 (provider not configured)          omit CALENDAR_PROVIDER entirely)
+                                  Stage 4: ui.provider.state=not_configured,
+                                  ui.trigger.enabled=false
 
 Calendar status in UI             CALENDAR_PROVIDER=demo for green state
-                                  (UI polls /calendar/status every 5 s)
+                                  (UI polls /calendar/status every 5 s;
+                                  Stage 4 ui block rendered directly from
+                                  ui.provider.label + ui.trigger.hint)
 
 ----------------------------------------------------------
-6. MINIMAL DEMO SETUP (fewest secrets)
+6. BROWSER VOICE PERMISSIONS (client-side, no env key)
 ----------------------------------------------------------
-All three Stage 3 paths live (text + voice + calendar):
+The browser voice capture path requires the user's browser to grant
+microphone access. This is independent of Worker env vars. States:
+
+  unsupported   — navigator.mediaDevices not available (non-HTTPS or
+                  very old browser). Voice capture button hidden.
+                  No Worker call made.
+
+  denied        — User denied mic permission (or browser policy blocks).
+                  #voice-status-badge shows data-state="error".
+                  No Worker call made.
+
+  idle          — Mic available; capture not started.
+                  #voice-status-badge data-state="idle" or hidden.
+
+  recording     — Browser capturing audio (MediaRecorder active).
+                  #voice-status-badge data-state="recording" with
+                  rec-pulse animation.
+                  NOT visible in /session/latest (client-side only).
+
+  processing    — Audio sent to POST /voice/capture; awaiting reply.
+                  #voice-status-badge data-state="processing".
+                  NOT visible in /session/latest until Worker records
+                  inbound item (pipeline recording addition in Stage 5+).
+
+  sent          — Reply received from Worker. Badge resets to idle.
+
+  error         — POST /voice/capture returned non-2xx or network error.
+                  #voice-status-badge data-state="error".
+
+Operator note: browser voice requires HTTPS. wrangler dev uses HTTP
+localhost; voice capture will show "unsupported" on plain HTTP unless
+the browser allows localhost as a secure origin.
+
+----------------------------------------------------------
+7. MINIMAL DEMO SETUP (fewest secrets)
+----------------------------------------------------------
+All four Stage 4 paths live (text + Telegram voice + browser voice +
+calendar):
 
   wrangler secret put TELEGRAM_BOT_TOKEN        → <bot token>
   wrangler secret put TELEGRAM_WEBHOOK_SECRET   → <webhook secret>
@@ -182,6 +266,7 @@ All three Stage 3 paths live (text + voice + calendar):
 
   4 secrets total. No API keys for calendar (demo is built-in).
   No wrangler.jsonc changes required.
+  Browser voice capture works on the deployed HTTPS Worker URL.
 
 Text only (no voice, no calendar):
   wrangler secret put TELEGRAM_BOT_TOKEN
@@ -189,7 +274,7 @@ Text only (no voice, no calendar):
   cd worker-wb && npm run deploy
 
 ----------------------------------------------------------
-7. OBSERVABILITY
+8. OBSERVABILITY
 ----------------------------------------------------------
 wrangler.jsonc has "observability.enabled": true. All logs via
 src/lib/logging.ts are captured. Each JSON line carries at minimum:
@@ -199,8 +284,16 @@ Correlation IDs flow: cf-ray → x-correlation-id → x-request-id →
 crypto.randomUUID(). Same ID appears in response body and
 x-correlation-id header.
 
+Key log tags (Stage 4):
+  session.latest.served       — pipeline_state included in log fields
+  calendar.status.poll        — triggered_by, ui_provider_state
+  calendar.status.run         — invocation.ok, ui_last_result_state
+  voice.capture.received      — audio_bytes, transcription_provider
+  voice.capture.transcribed   — transcript_length
+  voice.capture.reply_sent    — reply_text length
+
 ----------------------------------------------------------
-8. OPERATOR PRE-DEMO CHECKLIST
+9. OPERATOR PRE-DEMO CHECKLIST
 ----------------------------------------------------------
   [ ] wrangler whoami succeeds (correct account / zone)
   [ ] wrangler secret put TELEGRAM_BOT_TOKEN
@@ -212,6 +305,9 @@ x-correlation-id header.
   [ ] Telegram setWebhook → deployed URL, secret_token = TELEGRAM_WEBHOOK_SECRET
   [ ] curl -s https://<worker>.workers.dev/health | jq .ok  → true
   [ ] curl -s https://<worker>.workers.dev/calendar/status \
-        | jq .provider.ready  → true
+        | jq '.ui.provider.state'  → "ready"
+  [ ] curl -s https://<worker>.workers.dev/session/latest \
+        | jq '.pipeline.current_state'  → "idle" (before any messages)
   [ ] Operator UI at root ("/"):
-      Status bar shows Core: ok | Calendar: demo ready
+      Calendar trigger button enabled (ui.trigger.enabled=true)
+      Pipeline state trail visible after first message
