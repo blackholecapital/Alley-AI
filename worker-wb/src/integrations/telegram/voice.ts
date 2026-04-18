@@ -23,12 +23,20 @@
 
 import type { InternalEvent, TelegramEnv, TelegramVoice } from './types';
 import { sendTelegramMessage } from './outbound';
-import { recordInbound, recordOutbound, recordUiInbound, getLatest } from '../../lib/session-store';
+import {
+  recordInbound,
+  recordOutbound,
+  recordUiInbound,
+  recordUiOutbound,
+  recordFailure,
+  getLatest,
+} from '../../lib/session-store';
 import { getTranscriptionProvider } from '../../providers/transcription';
 import type { TranscriptionEnv } from '../../providers/transcription/provider';
 import { validateTranscriptionEnv } from '../../lib/env';
 import type { Logger } from '../../lib/logging';
 import { errorResponse, jsonResponse } from '../../lib/errors';
+import { generateAssistantReply } from '../../routes/telegram-webhook';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
@@ -380,9 +388,17 @@ export async function handleTelegramVoiceNote(
 // ────────────────────────────────────────────────────────────────────
 //
 // Receives multipart/form-data from the browser operator UI, validates
-// the audio blob, and forwards it into the shared transcription pipeline.
-// No reply handling: caller polls /session/latest for final state.
+// the audio blob, runs it through the shared transcription pipeline, and
+// closes the loop with the SAME completion pattern as the Telegram path:
+// after recordUiInbound it either generates an assistant reply via the
+// shared generateAssistantReply and persists it via recordUiOutbound, or
+// it persists a recordFailure entry so /session/latest advances beyond
+// "received" to "replied" or "failed". Inbound-without-outbound is a
+// PATCH condition.
 // Contract: /job_site/voice_capture_contract.txt (ENDPOINT CONTRACT)
+// Ref: build-sheet-EXEC-AI-STAGE4-001 S3 (voice completion parity).
+
+const VOICE_UI_CHAT_ID = 0;
 
 const ACCEPTED_AUDIO_MIME_BASES = ['audio/webm', 'audio/ogg', 'audio/mp4'];
 
@@ -469,6 +485,9 @@ export async function handleVoiceCapture(
   const provider = getTranscriptionProvider(env);
 
   let transcriptText: string | null = null;
+  let transcriptionFailureCode: string | null = null;
+  let transcriptionFailureMessage: string | null = null;
+
   if (provider.ready) {
     const result = await provider.transcribe({
       audio,
@@ -484,6 +503,8 @@ export async function handleVoiceCapture(
         text_length: result.text.length,
       });
     } else {
+      transcriptionFailureCode = 'transcription_failed';
+      transcriptionFailureMessage = `provider=${result.provider} reason=${result.reason}`;
       logger.warn('voice.capture.transcription_failed', {
         source_id: sourceId,
         provider: result.provider,
@@ -491,17 +512,71 @@ export async function handleVoiceCapture(
       });
     }
   } else {
+    transcriptionFailureCode = 'transcription_unavailable';
+    transcriptionFailureMessage = `transcription provider not ready (provider=${provider.name})`;
     logger.info('voice.capture.transcription_stub', {
       source_id: sourceId,
       provider: provider.name,
     });
   }
 
-  recordUiInbound({
+  // Persist inbound first — every captured turn must appear in the
+  // session trail before any reply or failure entry, mirroring the
+  // Telegram text + voice paths.
+  const inbound = recordUiInbound({
     text: transcriptText ?? `[voice: ${mimeType}, ${audioFile.size} bytes]`,
   });
-  const sessionId = getLatest().session.session_id;
 
+  // Completion: either a real assistant reply (recordUiOutbound) or a
+  // readable failure (recordFailure). Inbound-without-outbound is a
+  // PATCH condition — /session/latest must advance past "received".
+  if (transcriptText !== null) {
+    let replyText: string;
+    try {
+      replyText = generateAssistantReply(transcriptText);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error('voice.capture.reply_error', {
+        source_id: sourceId,
+        event_id: inbound.id,
+        error: msg,
+      });
+      recordFailure({
+        event_id: inbound.id,
+        chat_id: VOICE_UI_CHAT_ID,
+        failure_code: 'reply_generation_error',
+        failure_message: msg,
+        source: 'ui',
+      });
+      const sessionId = getLatest().session.session_id;
+      return jsonResponse(
+        { ok: true, session_id: sessionId },
+        { correlationId: logger.correlationId, headers: { 'cache-control': 'no-store' } },
+      );
+    }
+
+    recordUiOutbound({ event_id: inbound.id, text: replyText });
+    logger.info('voice.capture.replied', {
+      source_id: sourceId,
+      event_id: inbound.id,
+      reply_length: replyText.length,
+    });
+  } else {
+    recordFailure({
+      event_id: inbound.id,
+      chat_id: VOICE_UI_CHAT_ID,
+      failure_code: transcriptionFailureCode ?? 'transcription_failed',
+      failure_message: transcriptionFailureMessage ?? 'transcription unavailable',
+      source: 'ui',
+    });
+    logger.warn('voice.capture.failed', {
+      source_id: sourceId,
+      event_id: inbound.id,
+      failure_code: transcriptionFailureCode,
+    });
+  }
+
+  const sessionId = getLatest().session.session_id;
   logger.info('voice.capture.ok', { source_id: sourceId, session_id: sessionId });
 
   return jsonResponse(

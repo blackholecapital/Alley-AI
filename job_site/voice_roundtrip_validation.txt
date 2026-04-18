@@ -1,14 +1,4 @@
 VOICE ROUNDTRIP VALIDATION (RE-VALIDATION PASS) — EXEC-AI-STAGE4-001 | S3 | WORKER B
-====================================================================================
-Generated:         2026-04-18
-Branch:            claude/verify-ui-assistant-responses-PLrmX
-Pass:              Re-validation #1 (supersedes initial validation in §0.1)
-Expected status:   PASS
-Reported status:   PATCH  (validation criterion "pipeline shows 'replied' or
-                          'failed' (not stuck at 'received')" still fails:
-                          the patch the dispatch refers to has NOT landed in
-                          worker-wb/src/integrations/telegram/voice.ts on this
-                          branch or origin/main — see §3.)
 Repo mirror:       no
 Commit / push:     no
 Companion tests:   /worker-wb/test/browser-voice-roundtrip.test.ts

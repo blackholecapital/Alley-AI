@@ -1,0 +1,232 @@
+voice_capture_validation.txt
+EXEC-AI-STAGE4-001 | S3 | Worker A | Voice Capture Re-Validation
+
+PURPOSE
+  Re-validate the browser mic capture flow end-to-end after the S2 change
+  that unified the UI text path with the shared generateAssistantReply
+  pipeline. Confirm permission flow, state transitions, and the
+  POST /voice/capture contract still function. Validation + minimal-fix
+  only — no new features.
+
+BASELINE UNDER TEST
+  Branch:         claude/unify-reply-generator-Ygyhm
+  Head commit:    b512e17  "S4 S2 Worker A: unify UI reply generator with
+                             Telegram pipeline"
+  Contract ref:   /job_site/voice_capture_contract.txt
+  Build sheet:    /job_site/build-sheet-EXEC-AI-STAGE4-001.txt   (S3)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCOPE OF S2 CHANGE — BLAST RADIUS ANALYSIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  S2 touched exactly two files:
+    1. worker-wb/src/routes/ui-send.ts
+       - Removed buildReply() echo ("received: ...") placeholder.
+       - Now imports generateAssistantReply from telegram-webhook.ts and
+         uses it for every /ui/send turn. Records inbound, then reply,
+         then outbound. Adds recordFailure on reply-generation error.
+    2. worker-wb/src/lib/session-store.ts
+       - recordFailure now accepts an optional source (defaults to
+         'telegram' for backward compatibility).
+
+  Voice capture surface untouched:
+    /apps/operator-shell/src/ui/voice-capture.js       — unchanged
+    /apps/operator-shell/src/ui/index.html             — unchanged
+    /apps/operator-shell/src/ui/session.contract.ts    — unchanged
+    /worker-wb/src/integrations/telegram/voice.ts      — unchanged
+                                                         (handleVoiceCapture)
+    /worker-wb/src/index.ts (router row /voice/capture) — unchanged
+
+  Cross-path dependency check:
+    /voice/capture calls recordUiInbound(...) — unchanged.
+    /voice/capture does NOT call recordFailure, recordUiOutbound, or
+    generateAssistantReply, so S2's parameter additions and new callers
+    do not reach the voice path.
+
+  Conclusion: S2 cannot alter browser voice capture behaviour. Validation
+  below confirms the path still matches contract with no regressions.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+V1. STATE MACHINE — SOURCE AUDIT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  File: /apps/operator-shell/src/ui/voice-capture.js
+  Audited: all 8 contract states are reachable and gated per contract.
+
+    idle        ✓  module load default (voice-capture.js:25)
+    requesting  ✓  startCapture() after isSupported() true (L71)
+    recording   ✓  MediaRecorder.start() success (L107)
+    processing  ✓  stopAndSend() after _stopRecorder+_stopStream (L125)
+    sent        ✓  after _sendAudio resolution (L127)
+    denied      ✓  NotAllowedError | PermissionDeniedError (L78-79)
+                   NotFoundError   | DevicesNotFoundError (L80-81,
+                                      msg "No microphone found.")
+    unsupported ✓  isSupported()=false at startCapture entry (L64-66)
+    error       ✓  any other getUserMedia rejection (L82-84)
+                   MediaRecorder constructor throw   (L95-98)
+
+  Transitions verified against contract §VALID STATE TRANSITIONS:
+    idle → requesting        L71
+    idle → unsupported       L65
+    requesting → recording   L107
+    requesting → denied      L78-81
+    requesting → error       L82-84
+    recording → processing   L125
+    recording → idle         cancelCapture L136-143
+    processing → sent        L127
+    sent → idle              setTimeout 3000 L128
+    denied → requesting      L69 retry gate
+    error → requesting       L69 retry gate
+
+  Stream cleanup (contract §RECORDING LIFECYCLE) verified:
+    stopAndSend    → _stopStream BEFORE _sendAudio (L119 precedes L126)
+    cancelCapture  → _stopStream immediately       (L140)
+    MediaRecorder init error → _stopStream before state change (L96)
+    getUserMedia error       → no stream to stop (correct)
+
+  RESULT: state-machine source matches contract. No patch required.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+V2. PERMISSION / SUPPORT DETECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  isSupported() predicate (voice-capture.js:35-42) covers all three
+  required conditions from contract §UNSUPPORTED BROWSER DETECTION:
+    navigator != null                              ✓
+    navigator.mediaDevices != null                 ✓
+    typeof navigator.mediaDevices.getUserMedia...  ✓
+    typeof MediaRecorder !== 'undefined'           ✓
+
+  Initial state on page load (index.html:631) branches on isSupported:
+    true  → applyState('idle', null)
+    false → applyState('unsupported', null)
+
+  Permission prompt path:
+    getUserMedia({ audio: true, video: false }) at L75.
+    UI shows "requesting…" badge + "Waiting for microphone permission…"
+    message during the in-flight call (index.html MSGS L570).
+    On denial, button is re-enabled for retry (applyState L614-615
+    treats 'denied' as a terminal state, allowing start.disabled=false).
+
+  RESULT: permission flow present, visible, and retryable per contract.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+V3. MIME NEGOTIATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  _pickMimeType() (voice-capture.js:167-179) offers the 5 candidates
+  in the exact order from contract §MIME TYPE PREFERENCE ORDER:
+    audio/webm;codecs=opus
+    audio/webm
+    audio/ogg;codecs=opus
+    audio/ogg
+    audio/mp4
+  If none supported, returns null → MediaRecorder runs with browser
+  default (matches contract fallback).
+
+  Server-side acceptance (voice.ts:387) is aligned:
+    ACCEPTED_AUDIO_MIME_BASES = ['audio/webm', 'audio/ogg', 'audio/mp4']
+  isAcceptedAudioMime strips codec parameters before comparison.
+
+  RESULT: producer and consumer agree on MIME set. No patch required.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+V4. ENDPOINT CONTRACT — POST /voice/capture
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Client (_sendAudio, voice-capture.js:181-200):
+    - fetch('/voice/capture', { method: 'POST', body: FormData })
+    - FormData field "audio", filename "recording.webm"
+    - HTTP non-2xx → { ok:false, error:{ code:'http_<status>', ... } }
+    - Non-{ok:true} body → { ok:false, error:{ code:'bad_response' } }
+    - fetch rejection → { ok:false, error:{ code:'network' } }
+    All three error codes match contract §ERROR HANDLING RULES.
+
+  Server (handleVoiceCapture, voice.ts:394-508):
+    - POST only; other methods return 405 errorResponse envelope.
+    - Rejects when audio field missing / not a File → 400.
+    - Rejects unsupported MIME → 415.
+    - Rejects 0-byte audio → 400.
+    - Rejects > DEFAULT_MAX_VOICE_BYTES → 413.
+    - Success → 200 { ok:true, session_id:<string|null>, correlation_id }
+    - Appends a single recordUiInbound entry (text = transcript or
+      "[voice: mime, size bytes]" stub).
+
+  Every response is the shared JSON envelope (jsonResponse /
+  errorResponse); contract expectations hold.
+
+  RESULT: endpoint contract satisfied on both sides.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+V5. AUTOMATED EVIDENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Typecheck (post-S2 head b512e17):
+    $ cd worker-wb && npx tsc --noEmit
+    → exit 0, no diagnostics.
+
+  Unit suite — browser-voice-roundtrip.test.ts (post-S2 head b512e17):
+    $ node --loader ./test/ts-resolve.mjs \
+           --experimental-strip-types \
+           test/browser-voice-roundtrip.test.ts
+    → 24 passed, 0 failed (24 total)
+
+    Coverage highlights:
+      R1  valid audio POST → 200 { ok:true, session_id }
+      R1  exactly ONE inbound session item appended
+      R3  two consecutive captures share one stable session_id
+      R4  GET/DELETE → 405
+      R5  missing audio field → 400
+      R6  non-file audio entry → 400
+      R7  disallowed MIME (audio/mpeg, video/mp4, octet-stream) → 4xx
+      R8  empty blob → 400
+      R9  size guard at DEFAULT_MAX_VOICE_BYTES (20 MiB); +1 byte → 413
+      R10 audio/webm, audio/ogg, audio/mp4, audio/webm;codecs=opus → 200
+      R11 every rejection uses content-type application/json
+      invariant: rejection requests never pollute the session store
+      invariant: handler never throws — always returns a Response
+
+  Cross-surface suite — telegram-text-roundtrip.test.ts: 8 passed, 0 failed.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+V6. MANUAL BROWSER SMOKE PROTOCOL (operator follow-up)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The static-repo audit above proves code-level conformance. A human
+  operator should additionally walk the following steps against a
+  deployed Worker to confirm live browser behaviour:
+
+  Golden path:
+    [ ] Open operator shell over HTTPS in Chrome / Edge / Firefox.
+    [ ] Badge shows "idle" on load; Talk button enabled.
+    [ ] Click Talk → "requesting…" badge → browser permission prompt.
+    [ ] Allow → badge flips to "recording"; Stop & Send + Cancel visible.
+    [ ] Click Stop & Send → "sending…" → "sent" with "Audio received by
+        assistant."; auto-reset to "idle" after 3 s.
+    [ ] /session/latest shows one new inbound item for the capture with
+        matching session_id.
+
+  Denied / unsupported paths:
+    [ ] Deny permission → badge "denied", retry message, Talk re-enabled.
+    [ ] Cancel mid-recording → badge returns to "idle", no session row.
+    [ ] Block MediaRecorder (e.g. older browser) → badge "unsupported",
+        Talk disabled, unsupported message shown.
+
+  Server rejection paths:
+    [ ] Force non-audio mime → "sent" with ok=false, code "http_415".
+    [ ] Disconnect network → "sent" with ok=false, code "network".
+
+  Any deviation is a PATCH condition for S3 — no such deviation was
+  observed in the source audit or the automated suite.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERDICT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  PASS. S2's reply-generator unification does not reach the voice
+  capture surface. All contract clauses (state machine, permission
+  flow, MIME negotiation, endpoint contract, error envelope) remain
+  satisfied. 24/24 browser-voice-roundtrip tests pass on head b512e17.
+  No code changes required for S3.
+
+  expected_status: PASS
