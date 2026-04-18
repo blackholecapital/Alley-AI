@@ -1,373 +1,356 @@
-DEMO RUNBOOK — EXEC-AI-STAGE2-003
-==================================
-Stage:       S5 (Minimal observability / demo runbook)
-Owner:       Worker B
-Generated:   2026-04-16
-Scope:       One operator-runnable sequence that exercises the live
-             Cloudflare Worker deploy end to end: Telegram text,
-             Telegram voice intake, operator UI visibility, and every
-             known-good fallback outcome. Accurately tracks the code
-             shipped by S2, S3, and S4 Worker A at commit 8afccbc of
-             origin/main.
+DEMO RUNBOOK — EXEC-AI-STAGE4-001 | S6 | WORKER A
+======================================================
+Generated: 2026-04-18
+Branch:    claude/add-calendar-settings-3iOUJ
+Scope:     Single operator-runnable sequence that exercises the
+           live Cloudflare Worker deploy for Stage 4 across four
+           paths: (A) Telegram text reply completion, (B) one
+           browser voice round trip, (C) one calendar action,
+           (D) mobile check. Each path lists the exact command
+           or interaction and the evidence it produces. Evidence
+           manifest: /job_site/demo_evidence_requirements.txt.
 
-References consulted:
-  /job_site/factory-manual-v1.1.txt  (present as factory-manual-v1.11.txt)
-  /job_site/worker-execution-manual-v1.1.txt
-  /job_site/build-sheet-EXEC-AI-STAGE2-003.txt
-  /job_site/cloudflare_prep_report.txt
-  /job_site/cloudflare_access_matrix.txt
-  /job_site/ui_state_contract.txt
-  /job_site/voice_failure_modes.txt
-  /job_site/telegram_text_roundtrip_checklist.txt
-  /worker-wb/src (shipped Worker A S2 / S3 / S4 handlers)
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/Build Sheet — EXEC-AI-STAGE4-001.txt
+- /job_site/cloudflare_prep_report.txt
+- /job_site/text_reply_demo_checklist.txt    (S2 Worker B)
+- /job_site/voice_demo_checklist.txt         (S3 Worker B)
+- /job_site/voice_capture_contract.txt       (S3 Worker A)
+- /job_site/calendar_demo_checklist.txt      (Stage 3 S4 Worker B)
+- /job_site/calendar_ui_contract.txt         (S4 Worker A)
+- /job_site/ui_stage4_direction.txt          (S5 Worker A)
+- /worker-wb/wrangler.jsonc
+- /apps/operator-shell/src/ui/index.html
 
-====================================================================
-0. NAMING CONVENTIONS USED IN THIS RUNBOOK
-====================================================================
-BASE         base URL of the deployed Worker
-             (use the *.workers.dev URL during demo — not the
-             custom domain, so Cloudflare Access cannot intercept;
-             see /job_site/cloudflare_access_matrix.txt §6)
-             example: https://ali-ai.<account>.workers.dev
+NOTE: This runbook supersedes the Stage 2 version of
+      /job_site/demo_runbook.txt for Stage 4 demo purposes. The
+      four live-test paths covered here match Stage 4 validation
+      checks 8.2, 8.3, 8.4.
 
-BOT_TOKEN    Telegram Bot API token from @BotFather
-HOOK_SECRET  random slug shared with the Worker via
-             `wrangler secret put TELEGRAM_WEBHOOK_SECRET`
-OP_CHAT_ID   the Telegram chat_id the operator uses for the demo
+----------------------------------------------------------
+1. ENVIRONMENT ASSUMPTIONS
+----------------------------------------------------------
+Deployment:
+  Repo branch:       claude/add-calendar-settings-3iOUJ
+                     (or merged to main if CF-TEST is run post-merge)
+  Deploy root:       /worker-wb
+  Deploy command:    cd worker-wb && npm run deploy
+  UI asset path:     /apps/operator-shell/src/ui/* (served by worker)
+  Public base URL:   https://ali-ai.<account>.workers.dev
+                     (substitute <account> for the operator's Cloudflare
+                      account subdomain; alias BASE below.)
 
-All curl snippets assume BASE, BOT_TOKEN, HOOK_SECRET, and OP_CHAT_ID
-are set as shell env vars.
+Required secrets (wrangler):
+  TELEGRAM_BOT_TOKEN   — active Telegram bot token
+  CALENDAR_PROVIDER    — set to "demo" for the happy-path calendar
+                         demo. Leave empty or set to "none" for the
+                         failure-path proof.
+  Other model / transcription keys as required by the Stage 2/3
+  reply pipeline; see /job_site/demo_env_matrix.txt (Worker B S6).
 
-====================================================================
-1. PREREQUISITES  (one-time, before every demo)
-====================================================================
-1.1  Worker deployed
-     cd /home/user/ALI-ai/worker-wb
-     npm install                       # only once
-     npx wrangler deploy
-     # note the printed workers.dev URL -> use as BASE
+Browser (for voice + mobile):
+  Desktop: Chrome 124+, Edge 124+, or Firefox 126+ over HTTPS.
+  Mobile:  iOS Safari 17+ or Chrome for Android 124+.
+  Microphone permission must be grantable (no OS-level block).
 
-1.2  Secrets set on the Worker
-     cd /home/user/ALI-ai/worker-wb
-     npx wrangler secret put TELEGRAM_BOT_TOKEN
-     npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-     # optional (enables real transcription; voice path falls back
-     # to 502 reason:"no transcription provider configured" otherwise):
-     npx wrangler secret put DEEPGRAM_API_KEY
+Required public routes (respond 200, NOT 302 Access-login):
+  GET  /
+  GET  /health
+  GET  /session/latest
+  GET  /calendar/status
+  POST /telegram/webhook
+  POST /voice/capture
 
-1.3  Webhook registered against BASE (not the custom domain)
-     curl -s -X POST \
-       "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
-       -d "url=${BASE}/telegram/webhook" \
-       -d "secret_token=${HOOK_SECRET}" \
-       -d 'allowed_updates=["message"]'
-     # expect: {"ok":true,"result":true,"description":"Webhook was set"}
+Operator aliases (export once per shell):
+  export BASE="https://ali-ai.<account>.workers.dev"
 
-1.4  Webhook is actually wired to the right URL
-     curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
-     # expect: url == "${BASE}/telegram/webhook"
-     #         pending_update_count == 0
-     #         last_error_message == "" (or absent)
+----------------------------------------------------------
+2. PRE-FLIGHT CHECKS (run before any path)
+----------------------------------------------------------
 
-1.5  Health surface (implicit — no /health route; 404 is expected)
-     curl -s -o /dev/null -w "%{http_code}\n" "${BASE}/health"
-     # expect: 404
-     # NOTE: /health is declared in the build-sheet required_public_test_routes
-     # but the Worker at commit 8afccbc has no /health handler. S5 Worker A
-     # owes this; see /job_site/cloudflare_access_matrix.txt §5.
+PF-1  Health + boot
+      curl -s "$BASE/health" | jq '.ok,.boot_iso'
+      Expect: true  "<recent ISO timestamp>"
 
-====================================================================
-2. DEMO STEP 1 — TEXT ROUND TRIP (curl-driven)
-====================================================================
-Goal: prove that one POST to /telegram/webhook becomes a normalized
-inbound event, a recorded outbound reply, and appears in
-/session/latest — without touching the Telegram client.
+PF-2  Public routes not gated by Access
+      for r in / /health /session/latest /calendar/status; do
+        printf '%-20s ' "$r"
+        curl -s -o /dev/null -w '%{http_code}\n' "$BASE$r"
+      done
+      Expect: each line ends with 200 (not 302).
 
-2.1  Send a synthetic inbound text update
-     curl -s -X POST "${BASE}/telegram/webhook" \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: ${HOOK_SECRET}" \
-       -d @- <<JSON
-     {
-       "update_id": 900000001,
-       "message": {
-         "message_id": 1001,
-         "date": $(date +%s),
-         "text": "runbook hello",
-         "chat": { "id": ${OP_CHAT_ID}, "type": "private" },
-         "from": { "id": 111, "is_bot": false, "first_name": "Op" }
-       }
-     }
-     JSON
-     # expect (200 JSON):
-     #   { "ok": true, "handled": true,
-     #     "event_id": "telegram:900000001",
-     #     "reply_message_id": <number> }
-     # fail paths:
-     #   403 "forbidden"           -> HOOK_SECRET mismatch; check step 1.2
-     #   400 "bad request"         -> JSON parse failed or update_id missing
-     #   502 { error: "..." }      -> sendMessage failed (BOT_TOKEN wrong)
-     # 2.2 is expected to show BOTH inbound + outbound items.
+PF-3  Operator UI loads
+      Open $BASE/ in desktop Chrome. Confirm:
+        [ ] status bar shows Core, State, Session, Calendar + the
+            "⚙ Calendar" pill toggle
+        [ ] two panes render: Transcript (inbound) and Assistant
+            Response (outbound)
+        [ ] voice footer shows "idle" badge + Talk / (Stop & Send
+            hidden) / (Cancel hidden) + empty message
 
-2.2  Read the session snapshot
-     curl -s "${BASE}/session/latest" | jq .
-     # expect top-level keys:
-     #   ok:            true
-     #   session:       { session_id, started_at, last_event_at }
-     #   items:         [ ... ]   (newest first; <= 25 by default)
-     #   counts:        { inbound, outbound, total }
-     # expect within items[]:
-     #   two entries whose text is
-     #     outbound: "received: runbook hello"
-     #     inbound:  "runbook hello"
-     #   items[*].id prefixed "in:" or "out:"
+PF-4  Calendar provider readiness
+      curl -s "$BASE/calendar/status" \
+        | jq '{provider,action,invocation}'
+      Happy-path demo state expects:
+        provider.ready    == true
+        provider.provider == "demo"
+        action.action_type == "calendar.list_today"
+        action.registered  == true
+        invocation         == null
 
-2.3  Repeat with a longer text (payload truncation demo)
-     TEXT=$(printf 'abc%.0s' {1..100})    # 300 chars of "abc"
-     curl -s -X POST "${BASE}/telegram/webhook" \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: ${HOOK_SECRET}" \
-       -d "{\"update_id\":900000002,
-            \"message\":{\"message_id\":1002,\"date\":$(date +%s),
-                         \"text\":\"${TEXT}\",
-                         \"chat\":{\"id\":${OP_CHAT_ID},\"type\":\"private\"},
-                         \"from\":{\"id\":111,\"is_bot\":false}}}"
-     # expect reply text (visible via step 2.2): "received: " + first 200 chars.
+If any PF step fails, stop and fix before proceeding. Record the
+failing item in the evidence bundle under /pre_flight/failed.
 
-====================================================================
-3. DEMO STEP 2 — TEXT ROUND TRIP (real Telegram client)
-====================================================================
-3.1  Open the operator's Telegram, send the bot "hello from telegram".
-3.2  Within ~2 seconds, the bot replies "received: hello from telegram".
-3.3  curl -s "${BASE}/session/latest" | jq '.items[] | {direction, text}'
-     # expect:
-     #   {"direction":"outbound","text":"received: hello from telegram"}
-     #   {"direction":"inbound","text":"hello from telegram"}
+----------------------------------------------------------
+3. PATH A — TEXT REPLY COMPLETION
+----------------------------------------------------------
+Validates build-sheet validation_check_1.
 
-Failure-visible signals (operator-facing):
-  * no bot reply within 5 s ->
-      curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo" \
-        | jq '{last_error_message, last_error_date, pending_update_count}'
-      # a non-empty last_error_message tells you exactly what broke.
-  * /session/latest does not show the message ->
-      webhook never reached the Worker; check Access + secret.
+Setup:
+  Telegram bot set (TELEGRAM_BOT_TOKEN) and webhook pointed at
+  $BASE/telegram/webhook. Operator UI open in desktop Chrome.
 
-====================================================================
-4. DEMO STEP 3 — VOICE INTAKE (real Telegram client)
-====================================================================
-4.1  Operator records & sends a short voice note (<= 30 s) to the bot.
-4.2  Two possible known-good outcomes:
-     (a) DEEPGRAM_API_KEY set        -> bot replies
-           "transcribed: <actual speech text>"
-         /session/latest shows two items:
-           inbound  kind:"voice"  text:"<transcript>"
-           outbound kind:"text"   text:"transcribed: <transcript>"
-     (b) DEEPGRAM_API_KEY NOT set    -> transcription provider = noop
-         webhook returns 502 with:
-           { "ok": false, "handled": true,
-             "stage": "transcription",
-             "provider": "noop",
-             "reason": "no transcription provider configured",
-             "retryable": false }
-         /session/latest shows ONE item:
-           inbound kind:"voice" text:null       (no outbound — expected)
-         The bot does not reply in Telegram. This is an acceptable
-         Stage-2 demo-safe failure; see §6 below.
+Steps:
 
-====================================================================
-5. DEMO STEP 4 — OPERATOR UI VERIFICATION
-====================================================================
-The operator UI is the plain-ESM shell under
-/apps/operator-shell/src/ui, wired in S3 Worker B. It polls
-/session/latest every 5 s and renders four states.
+A-1  From the operator's phone Telegram client send the test
+     message:
+       "ping stage 4 text test"
 
-5.1  Serve the UI locally (pointed at the deployed Worker)
-     # In a dev workflow, serve /apps/operator-shell/src/ui/ via any
-     # static server and rewrite fetch('/session/latest') to the
-     # deployed BASE, or run the UI from a local proxy that forwards
-     # /session/latest to BASE. Example using Caddy or a one-liner
-     # proxy is acceptable.
+A-2  In the Worker UI confirm within 10 seconds:
+     [ ] #transcript-log shows an inbound entry with the body
+         above, username populated, timestamp "now".
+     [ ] #response-log shows a matching outbound entry with the
+         assistant reply body fully rendered (not empty, not
+         "[pending]").
+     [ ] #status-core flips to "live" (green), #status-state
+         reads "live".
+     [ ] #last-event-marker shows "last event Ns ago" and
+         increments.
 
-5.2  Manual state walk (each state MUST be visibly reachable):
-     LOADING   open the page fresh -> first tick shows panes
-               "loading…", marker shows "loading".
-     EMPTY     reset session (restart Worker isolate or use a fresh
-               deploy) -> panes show "no inbound messages yet" /
-               "no assistant replies yet"; marker shows
-               "no events yet"; #status-core == "idle".
-     LIVE      run §2 or §3 -> inbound appears in transcript pane,
-               outbound appears in response pane; marker counts up
-               "last event Ns ago" and re-ticks every second;
-               #status-core == "live".
-     ERROR     temporarily point the UI at a bad URL (or stop the
-               Worker) -> marker shows "error: <reason>"; panes
-               keep their last content; #status-core == "error";
-               next good poll self-heals to LIVE.
+A-3  Send a second message immediately to prove two consecutive
+     exchanges complete:
+       "second text, please confirm"
 
-5.3  DOM hooks to capture in screenshots (see §7):
-       #status-core        — state badge
-       #status-state       — raw UIRenderState.kind
-       #status-session     — session id (short)
-       #last-event-marker  — "last event Xs ago"
-       #transcript-log     — inbound items
-       #response-log       — outbound items
+A-4  Confirm two pairs of entries are visible in both panes.
 
-====================================================================
-6. KNOWN-GOOD FALLBACK OUTCOMES
-====================================================================
-Every failure below is demo-safe: the Worker never crashes, the
-response is readable, and the outcome is visible either in the
-webhook response body or in /session/latest. Operator can hit each
-of these intentionally during the demo and still PASS.
+A-5  Probe /session/latest directly:
+       curl -s "$BASE/session/latest" \
+         | jq '{session_id, last_event_at, count: (.events|length)}'
+     Expect:
+       session_id   non-null
+       events.length  >= 4  (2 inbound + 2 outbound)
 
-6.1  Wrong webhook secret
-     curl -s -o /dev/null -w "%{http_code}\n" \
-       -X POST "${BASE}/telegram/webhook" \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: wrong" \
-       -d '{"update_id":1}'
-     # expect: 403
-     # body:   "forbidden"
+Evidence produced: see EV-A in demo_evidence_requirements.txt.
 
-6.2  Bad JSON body
-     curl -s -o /dev/null -w "%{http_code}\n" \
-       -X POST "${BASE}/telegram/webhook" \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: ${HOOK_SECRET}" \
-       -d 'not-json'
-     # expect: 400
-     # body:   "bad request"
+Failure fallback (documented, not staged):
+  If reply does not render in A-2, capture the inbound-only state
+  plus the Worker `wrangler tail` output and stop. The Stage 4
+  pass condition requires completed replies; a partial reply is
+  a PATCH back to S2.
 
-6.3  Missing update_id
-     curl -s "${BASE}/telegram/webhook" \
-       -X POST \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: ${HOOK_SECRET}" \
-       -d '{}'
-     # expect: 400 "bad request"
+----------------------------------------------------------
+4. PATH B — BROWSER VOICE ROUND TRIP
+----------------------------------------------------------
+Validates build-sheet validation_check_2.
 
-6.4  Update with no message (edited_message absent, no message key)
-     curl -s -X POST "${BASE}/telegram/webhook" \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: ${HOOK_SECRET}" \
-       -d '{"update_id":900001000}'
-     # expect: 200
-     #         { "ok": true, "handled": false, "reason": "no_message" }
+Setup:
+  Same browser / UI. Grant microphone permission ahead of time
+  in the browser's site settings (or let the prompt appear on
+  first Talk click).
 
-6.5  Unsupported kind (sticker)
-     curl -s -X POST "${BASE}/telegram/webhook" \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: ${HOOK_SECRET}" \
-       -d '{"update_id":900001001,
-            "message":{"message_id":2001,"date":1,
-                       "chat":{"id":1,"type":"private"},
-                       "sticker":{"file_id":"x"}}}'
-     # expect: 200
-     #         { "ok": true, "handled": false,
-     #           "reason": "kind:other", "event_id": "telegram:900001001" }
+Steps:
 
-6.6  Voice — duration exceeds 120 s guard
-     curl -s -X POST "${BASE}/telegram/webhook" \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: ${HOOK_SECRET}" \
-       -d '{"update_id":900001002,
-            "message":{"message_id":2002,"date":1,
-                       "chat":{"id":1,"type":"private"},
-                       "voice":{"file_id":"x","file_unique_id":"u",
-                                "duration":600,"file_size":1000}}}'
-     # expect: 502
-     #         { "ok": false, "handled": true,
-     #           "stage": "voice_fetch",
-     #           "reason": "duration_too_long",
-     #           "detail": "voice 600s exceeds max 120s" }
+B-1  In the voice footer click "🎙 Talk".
+     Expected badge transitions:
+       idle -> requesting -> recording
+     On permission prompt grant access. Badge pulses red during
+     recording. #voice-message reads:
+       "Recording — press Stop & Send when done."
 
-6.7  Voice — declared size exceeds 20 MiB guard
-     curl -s -X POST "${BASE}/telegram/webhook" \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: ${HOOK_SECRET}" \
-       -d '{"update_id":900001003,
-            "message":{"message_id":2003,"date":1,
-                       "chat":{"id":1,"type":"private"},
-                       "voice":{"file_id":"x","file_unique_id":"u",
-                                "duration":5,"file_size":40000000}}}'
-     # expect: 502
-     #         { "ok": false, "handled": true,
-     #           "stage": "voice_fetch",
-     #           "reason": "size_too_large", ... }
+B-2  Speak a short phrase (3-5 s):
+       "calendar check for today please"
 
-6.8  Voice — getFile reports missing file (file_id invalid)
-     curl -s -X POST "${BASE}/telegram/webhook" \
-       -H "Content-Type: application/json" \
-       -H "X-Telegram-Bot-Api-Secret-Token: ${HOOK_SECRET}" \
-       -d '{"update_id":900001004,
-            "message":{"message_id":2004,"date":1,
-                       "chat":{"id":1,"type":"private"},
-                       "voice":{"file_id":"nonexistent",
-                                "file_unique_id":"u","duration":5,
-                                "file_size":1000}}}'
-     # expect: 502 stage:"voice_fetch"
-     #         reason: one of "getfile_http_error" |
-     #                         "getfile_missing_path" |
-     #                         "getfile_non_json"
-     # (exact reason depends on Telegram's response to a fake file_id.)
+B-3  Click "■ Stop & Send".
+     Expected badge transitions:
+       recording -> processing -> sent
+     #voice-message flips to "Audio received by assistant."
+     (green) when upload ok.
 
-6.9  Voice — no transcription provider configured
-     Send any real voice note when DEEPGRAM_API_KEY is unset.
-     Expect: 502 stage:"transcription" provider:"noop"
-             reason:"no transcription provider configured"
-             retryable:false
-     /session/latest shows inbound voice item with text:null.
+B-4  Within 15 s the inbound transcript pane receives a voice
+     entry with:
+       [ ] kind badge "🎙 voice"
+       [ ] transcribed text (or "[voice note — transcription
+           pending]" followed by a second update with text)
 
-6.10 /session/latest with wrong method
-     curl -s -o /dev/null -w "%{http_code}\n" \
-       -X POST "${BASE}/session/latest"
-     # expect: 405
+B-5  The outbound pane receives the completed assistant reply
+     (should reference today's calendar because CALENDAR_PROVIDER
+     is "demo"; otherwise a generic reply is acceptable).
 
-6.11 Unknown path
-     curl -s -o /dev/null -w "%{http_code}\n" "${BASE}/nope"
-     # expect: 404
+B-6  Probe /session/latest and confirm at least one event has
+     kind "voice":
+       curl -s "$BASE/session/latest" \
+         | jq '[.events[] | select(.kind=="voice")] | length'
+     Expect: >= 1
 
-====================================================================
-7. GOLDEN-PATH ORDER OF OPERATIONS (demo script, ~5 minutes)
-====================================================================
-1. Verify §1.4 getWebhookInfo shows a clean state.
-2. Do §2.1 curl text round trip -> screenshot 200 response body.
-3. Do §2.2 /session/latest -> screenshot JSON with inbound + outbound.
-4. Open the operator UI (§5) and observe LIVE state -> screenshot.
-5. From the Telegram client (§3) send "hello from telegram" ->
-   screenshot the bot reply in Telegram.
-6. Refresh or wait for the UI poll -> screenshot updated marker
-   "last event 0s ago" and new entries in both panes.
-7. Optional: send a voice note (§4) -> screenshot the outcome
-   (transcribed reply if Deepgram configured; noop 502 otherwise).
-8. Demonstrate one fallback from §6 (6.1 is fastest) -> screenshot
-   403 response.
+Evidence produced: see EV-B in demo_evidence_requirements.txt.
 
-====================================================================
-8. SIGN-OFF TABLE
-====================================================================
-  Area                           Result (PASS / FAIL / SKIP)
-  ------------------------------ ---------------------------
-  1  Prerequisites               [    ]
-  2  Text round trip (curl)      [    ]
-  3  Text round trip (Telegram)  [    ]
-  4  Voice intake                [    ]
-  5  UI state walk               [    ]
-  6  Fallback outcomes           [    ]
-  7  Golden path end-to-end      [    ]
+Denied / unsupported fallbacks (acceptable alternate proof):
+  - If the browser blocks the mic, the badge must show "denied"
+    and #voice-message explains how to re-grant permission.
+  - If the browser lacks MediaRecorder, the badge must show
+    "unsupported" and the Talk button stays disabled.
+  Either fallback is a valid Stage 4 proof for validation_check_2
+  if the primary round trip cannot run on the operator device —
+  BUT at least one successful round trip must exist on any
+  supported device in the final evidence bundle.
 
-====================================================================
-9. RUNBOOK-LEVEL ISSUES / FLAGS
-====================================================================
-- /health route is declared in the build-sheet public test routes but
-  is NOT implemented at commit 8afccbc. §1.5 records that
-  /health -> 404 is the current truth; Foreman A must decide whether
-  to patch S2 or add a handler before CF-TEST.
-- Worker A S5 artifacts (logging.ts / env.ts / errors.ts /
-  demo_env_matrix.txt) are not present at runbook-write time. This
-  runbook is source-of-truth for the demo regardless, because it
-  describes user-observable behavior rather than internal logging.
-- Custom-domain testing is intentionally out of scope for this
-  runbook; use the *.workers.dev URL (§0) to avoid Cloudflare Access
-  interference. See /job_site/cloudflare_access_matrix.txt §6 for the
-  bypass policy Foreman B must verify before CF-VERIFY.
+----------------------------------------------------------
+5. PATH C — CALENDAR ACTION (HAPPY + SAFE FAILURE)
+----------------------------------------------------------
+Validates build-sheet validation_check_3.
+
+C-1 (happy path) — ensure CALENDAR_PROVIDER="demo" is set.
+    In the operator UI click the "⚙ Calendar" pill in the
+    status bar to open the calendar drawer.
+    Confirm:
+      [ ] provider name reads "demo"
+      [ ] state pill reads "configured · ready" (green)
+      [ ] guidance block is hidden
+      [ ] Run button is enabled
+
+C-2 Click "Run calendar.list_today".
+    Within 3 s the Last Result surface shows:
+      [ ] ok pill (green)
+      [ ] reply_text listing today's 3 demo events
+          (Team standup / Product review / 1:1 with Alex)
+      [ ] meta line: "handled_at <ISO> · 3 events"
+
+C-3 Confirm via curl:
+      curl -s "$BASE/calendar/status?run=1" \
+        | jq '{ok: .invocation.ok,
+               reply_text: .invocation.reply_text,
+               event_count: .invocation.payload.event_count}'
+    Expect: ok=true, event_count=3, reply_text non-empty.
+
+C-4 (safe failure) — set CALENDAR_PROVIDER empty:
+      wrangler secret put CALENDAR_PROVIDER   (value: "")
+      (Or delete it: wrangler secret delete CALENDAR_PROVIDER.)
+    Reload the UI. In the calendar drawer confirm:
+      [ ] state pill reads "unconfigured" (amber)
+      [ ] guidance block is visible with the demo-mode instruction
+      [ ] Run button still enabled
+
+C-5 Click "Run calendar.list_today" again.
+    Last Result surface now shows:
+      [ ] fail pill (red)
+      [ ] reply_text naming CALENDAR_PROVIDER
+      [ ] meta line includes "error.code provider_not_ready"
+    HTTP status remains 200 (route never throws).
+
+C-6 Restore CALENDAR_PROVIDER="demo" for the final evidence
+    capture in C-2. The Last Result surface will re-populate to
+    ok on next click.
+
+Evidence produced: see EV-C in demo_evidence_requirements.txt.
+
+----------------------------------------------------------
+6. PATH D — MOBILE CHECK
+----------------------------------------------------------
+Validates build-sheet S5 pass condition (UI mobile-usable).
+
+Perform on either iOS Safari 17+ or Chrome for Android 124+ with
+the device held in portrait orientation.
+
+D-1  Open $BASE/ on the phone.
+     [ ] Status bar is compact; scroll-x reveals any overflow
+         items without clipping the "⚙ Calendar" pill.
+     [ ] Panes are stacked vertically (Transcript on top,
+         Assistant Response below).
+     [ ] Voice footer is pinned to the bottom, Talk button
+         visible and tappable (accent blue).
+
+D-2  Tap "⚙ Calendar".
+     [ ] Drawer slides in full-screen (width: 100vw).
+     [ ] Close (×) returns to chat.
+
+D-3  Send one text message from Telegram on the same device.
+     [ ] Inbound and outbound entries render in their stacked
+         panes.
+     [ ] #status-core reads "live".
+
+D-4  Tap "🎙 Talk" and perform a short voice round trip
+     (same as Path B).
+     [ ] Buttons remain usable (tap targets ≥ 34 px).
+     [ ] At viewport < 420 px button labels collapse to icons
+         but remain identifiable via aria-label.
+
+Evidence produced: see EV-D in demo_evidence_requirements.txt.
+
+----------------------------------------------------------
+7. EVIDENCE CAPTURE SUMMARY
+----------------------------------------------------------
+For each completed path capture the evidence listed below and
+store it in a local folder `/stage4_evidence/<UTC-date>/` with
+subfolders per path. Full checklist:
+/job_site/demo_evidence_requirements.txt.
+
+  Path A   2 screenshots + 1 curl JSON
+  Path B   2 screenshots + 1 curl JSON + 1 short screen recording
+  Path C   4 screenshots + 2 curl JSON (happy + failure)
+  Path D   3 mobile screenshots
+  PF       1 curl log (all routes), 1 UI screenshot
+
+Total minimum: 12 screenshots, 4 curl JSON outputs, 1 screen
+recording of the voice round trip.
+
+----------------------------------------------------------
+8. ACCEPTANCE GATES (for S6 Worker A checkpoint)
+----------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] /job_site/demo_runbook.txt exists (this file) and lists
+      all four paths (A text, B voice, C calendar, D mobile).
+  [ ] /job_site/demo_evidence_requirements.txt exists and maps
+      each path to its evidence items.
+  [ ] Operator can follow the runbook start-to-finish without
+      tribal knowledge — secrets, routes, browsers, and fallback
+      behaviours are spelled out.
+
+PATCH conditions (any one fails):
+  [ ] Runbook omits any of text / voice / calendar / mobile.
+  [ ] Evidence list hides tribal knowledge (e.g. "use the usual
+      prod key").
+  [ ] Stated routes or secrets contradict Stage 4 wrangler
+      configuration.
+
+----------------------------------------------------------
+9. ARTIFACT SELF-CHECK
+----------------------------------------------------------
+expected_artifact_1: /job_site/demo_runbook.txt                — present (this file)
+expected_artifact_2: /job_site/demo_evidence_requirements.txt  — present (companion)
+repo_mirror_required: no
+commit_required:      no
+push_required:        no
+
+----------------------------------------------------------
+10. ISSUES / FLAGS
+----------------------------------------------------------
+- This runbook does NOT set up the Telegram webhook. Assume
+  CF-TEST operator has previously registered the webhook; if not,
+  use wrangler secrets + Telegram setWebhook before Path A.
+- Voice transcription timing depends on the S2/S3 pipeline. If
+  transcription takes longer than 15 s the voice entry may
+  render with a "transcription pending" placeholder first; the
+  second poll should replace it with transcribed text. Operator
+  should wait one full poll cycle (5 s) before declaring B-4 a
+  failure.
+- Mobile check does NOT require a separate device for validation
+  — a browser dev-tools device emulation profile (iPhone 14 Pro
+  portrait) is acceptable for Path D if accompanied by one real
+  screenshot at full device width.
+- CALENDAR_PROVIDER flip in C-4 is a live wrangler mutation. If
+  the operator prefers not to flip in production, the safe
+  failure can be captured from a staging environment or preview
+  deploy instead — mark which environment the screenshot came
+  from in the evidence bundle.
