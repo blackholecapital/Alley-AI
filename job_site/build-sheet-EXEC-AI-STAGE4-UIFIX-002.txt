@@ -1,0 +1,641 @@
+BUILD SHEET
+
+form_id: BUILD-SHEET-STANDARD-SHORT-v3
+form_name: UI-ONLY RECOVERY SHEET — EXEC-AI-STAGE4-UIFIX-002
+
+1. JOB
+   1.1 job_id: EXEC-AI-STAGE4-UIFIX-002
+   1.2 job_name: Executive AI Assistant Stage 4 UI Recovery — Deployed UI Alignment + Voice Capture Route + Calendar Surface
+   1.3 objective: Replace the currently deployed broken operator UI with the correct Stage 4 UI and restore one testable browser path for chat, voice, and calendar.
+   1.4 requested_outcome: Live deployed UI matches repo-intended Stage 4 controls, browser text uses one correct route, browser voice uses one real backend route, and calendar state is operable from the UI.
+   1.5 target_root_path: /apps/operator-shell
+   1.6 target_repo_url: [https://github.com/blackholecapital/ALI-ai](https://github.com/blackholecapital/ALI-ai)
+   1.7 inspection_url: [https://github.com/blackholecapital/ALI-ai/tree/main](https://github.com/blackholecapital/ALI-ai/tree/main)
+
+2. RUN CONTROL
+   2.1 mode: single
+   2.2 execution_foreman: Foreman A
+   2.3 checksum_foreman: Foreman B
+   2.4 final_validator: Factory Control Interface
+
+3. TAG FORMAT
+   3.1 foreman_header
+   3.1.1 job_id:
+   3.1.2 foreman:
+   3.1.3 current_stage:
+   3.1.4 current_pass:
+   3.1.5 next_stage:
+   3.1.6 next_owner:
+   3.1.7 passes_remaining:
+   3.1.8 status:
+   3.1.9 current_action:
+
+3.2 worker_tag_format
+3.2.1 [PROJECT | WORKER | STAGE | RESULT]
+
+4. PATHS
+   4.1 stage_activity_log: /job_site/stage_activity_log.txt
+   4.2 final_checksum_path: /job_site/final_checksum.txt
+   4.3 final_tps_report: /job_site/TPS_REPORT.txt
+
+5. REFERENCES
+   5.1 required_references:
+   5.1.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+   5.1.2 /job_site/factory-manual-v1.1.txt
+   5.1.3 /job_site/foreman-manual-v1.1.txt
+   5.1.4 /job_site/worker-execution-manual-v1.1.txt
+   5.2 external_references:
+   5.2.1 [https://github.com/blackholecapital/ALI-ai](https://github.com/blackholecapital/ALI-ai)
+   5.2.2 [https://github.com/mckaywrigley/chatbot-ui](https://github.com/mckaywrigley/chatbot-ui)
+   5.2.3 [https://github.com/iOfficeAI/AionUi](https://github.com/iOfficeAI/AionUi)
+
+6. STAGE
+   6.1 stage_id: S1
+   6.2 stage_name: UI Failure Lock
+   6.3 stage_owner: Factory Control Interface
+   6.4 stage_goal: Lock the exact failed conditions before any new work.
+   6.5 stage_inputs:
+   6.5.1 live UI screenshots
+   6.5.2 current repo main
+   6.5.3 current Cloudflare deployment target
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER A | S1 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Create /job_site/ui_failure_lock.txt listing only these locked failures:
+6.6.3.1.1 deployed UI does not match intended Stage 4 control surface
+6.6.3.1.2 browser voice is not testable from UI
+6.6.3.1.3 browser chat route behavior is inconsistent
+6.6.3.1.4 calendar remains unconfigured or unusable from UI
+6.6.4 expected_artifacts:
+6.6.4.1 /job_site/ui_failure_lock.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.6.6 repo_mirror_required: no
+6.6.7 commit_required: no
+6.6.8 push_required: no
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER B | S1 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Create /job_site/ui_recovery_scope.txt locking this run to UI recovery only: deployed asset alignment, one browser chat route, one browser voice route, one calendar surface, and one mobile-usable shell.
+6.7.4 expected_artifacts:
+6.7.4.1 /job_site/ui_recovery_scope.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.7.6 repo_mirror_required: no
+6.7.7 commit_required: no
+6.7.8 push_required: no
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/ui_failure_lock.txt
+6.8.2 /job_site/ui_recovery_scope.txt
+6.9 checkpoint_id: S1-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Failed conditions are explicitly locked and scope is reduced to UI recovery only.
+   7.2 patch_condition: Scope expands into unrelated assistant intelligence work, telephony, or broad redesign.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S2
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S1
+   7.4.2 return_owner: Factory Control Interface
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S2
+   6.2 stage_name: Deployed UI Asset Alignment
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Ensure the live deployed UI exactly matches the repo-owned Stage 4 UI shell.
+   6.5 stage_inputs:
+   6.5.1 /apps/operator-shell
+   6.5.2 current Worker asset config
+   6.5.3 Cloudflare deployment target
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER A | S2 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Identify the exact static asset entrypoint and served bundle path for the operator UI, remove stale or wrong asset wiring, and make the deployed UI load the current intended shell only.
+6.6.4 expected_artifacts:
+6.6.4.1 /job_site/ui_asset_map.txt
+6.6.4.2 /job_site/ui_deploy_root.txt
+6.6.4.3 /apps/operator-shell/src/*
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.6.5.2 /job_site/ui_failure_lock.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER B | S2 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Produce one UI shell checklist verifying the deployed interface contains only the intended controls for this run: chat input, send, talk, stop/send or equivalent recording controls, calendar entry, status strip, and mobile-safe layout.
+6.6.4 expected_artifacts:
+6.7.4.1 /job_site/ui_shell_checklist.txt
+6.7.4.2 /job_site/ui_shell_contract.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.7.5.2 /job_site/ui_failure_lock.txt
+6.7.6 repo_mirror_required: yes
+6.7.7 commit_required: yes
+6.7.8 push_required: yes
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/ui_asset_map.txt
+6.8.2 /job_site/ui_deploy_root.txt
+6.8.3 /job_site/ui_shell_checklist.txt
+6.8.4 /job_site/ui_shell_contract.txt
+6.9 checkpoint_id: S2-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Live UI loads the intended shell and no stale control surface remains.
+   7.2 patch_condition: Deployed UI still differs from repo-owned shell or stale assets still render live.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S3
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S2
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S3
+   6.2 stage_name: Browser Chat Route Unification
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Make browser chat use one route only and remove placeholder or conflicting browser path behavior.
+   6.5 stage_inputs:
+   6.5.1 current browser send handler
+   6.5.2 current worker chat routes
+   6.5.3 current session state surface
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER A | S3 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Select one browser chat path only, remove conflicting placeholder path behavior, and make the UI return one deterministic assistant response path that is testable from the browser.
+6.6.4 expected_artifacts:
+6.6.4.1 /worker-wb/src/routes/ui-send.ts
+6.6.4.2 /job_site/browser_chat_route_contract.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.6.5.2 /job_site/ui_failure_lock.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER B | S3 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Add one browser-only test and one operator checklist proving browser text input produces a non-placeholder assistant reply and persists the visible exchange.
+6.7.4 expected_artifacts:
+6.7.4.1 /worker-wb/test/browser-chat-route.test.ts
+6.7.4.2 /job_site/browser_chat_demo_checklist.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.7.5.2 /job_site/browser_chat_route_contract.txt
+6.7.6 repo_mirror_required: yes
+6.7.7 commit_required: yes
+6.7.8 push_required: yes
+
+6.8 required_stage_artifacts:
+6.8.1 /worker-wb/src/routes/ui-send.ts
+6.8.2 /job_site/browser_chat_route_contract.txt
+6.8.3 /worker-wb/test/browser-chat-route.test.ts
+6.8.4 /job_site/browser_chat_demo_checklist.txt
+6.9 checkpoint_id: S3-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Browser chat uses one route only and live UI no longer shows receipt-only placeholder behavior.
+   7.2 patch_condition: Placeholder replies persist, conflicting routes remain, or browser UI still does not surface a real assistant response path.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S4
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S3
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S4
+   6.2 stage_name: Browser Voice Route Recovery
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Make the Talk button trigger real browser mic permission flow and connect to one real backend capture route.
+   6.5 stage_inputs:
+   6.5.1 current Talk button behavior
+   6.5.2 current frontend voice capture code
+   6.5.3 current worker routes
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER A | S4 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Make the browser request mic permission, visibly enter recording state, and submit captured audio to one actual backend route that exists in the Worker runtime.
+6.6.4 expected_artifacts:
+6.6.4.1 /apps/operator-shell/src/*
+6.6.4.2 /worker-wb/src/routes/voice-capture.ts
+6.6.4.3 /job_site/browser_voice_contract.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.6.5.2 /job_site/ui_failure_lock.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER B | S4 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Add one browser voice test/checklist covering mic permission granted, permission denied, unsupported browser, record, stop/send, and visible round-trip state.
+6.7.4 expected_artifacts:
+6.7.4.1 /worker-wb/test/browser-voice-route.test.ts
+6.7.4.2 /job_site/browser_voice_demo_checklist.txt
+6.7.4.3 /job_site/browser_voice_failure_modes.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.7.5.2 /job_site/browser_voice_contract.txt
+6.7.6 repo_mirror_required: yes
+6.7.7 commit_required: yes
+6.7.8 push_required: yes
+
+6.8 required_stage_artifacts:
+6.8.1 /worker-wb/src/routes/voice-capture.ts
+6.8.2 /job_site/browser_voice_contract.txt
+6.8.3 /worker-wb/test/browser-voice-route.test.ts
+6.8.4 /job_site/browser_voice_demo_checklist.txt
+6.8.5 /job_site/browser_voice_failure_modes.txt
+6.9 checkpoint_id: S4-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Talk path triggers browser mic permission flow and one real voice capture route exists and is testable from the UI.
+   7.2 patch_condition: Talk still does not request mic permission, no real capture route exists, or UI voice state remains non-testable.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S5
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S4
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S5
+   6.2 stage_name: Calendar UI Recovery
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Make calendar state and one calendar action visible and operable from the browser UI.
+   6.5 stage_inputs:
+   6.5.1 current calendar status path
+   6.5.2 current browser UI shell
+   6.5.3 current runtime config values
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER A | S5 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Add one visible calendar surface in the UI that shows provider state, required setup state, and one testable action path from the browser.
+6.6.4 expected_artifacts:
+6.6.4.1 /apps/operator-shell/src/*
+6.6.4.2 /job_site/calendar_surface_contract.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.6.5.2 /job_site/ui_failure_lock.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER B | S5 | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Document the exact runtime values needed for browser calendar testing and add one UI checklist for configured and unconfigured states.
+6.7.4 expected_artifacts:
+6.7.4.1 /job_site/calendar_runtime_requirements.txt
+6.7.4.2 /job_site/calendar_ui_demo_checklist.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.7.5.2 /job_site/calendar_surface_contract.txt
+6.7.6 repo_mirror_required: yes
+6.7.7 commit_required: yes
+6.7.8 push_required: yes
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/calendar_surface_contract.txt
+6.8.2 /job_site/calendar_runtime_requirements.txt
+6.8.3 /job_site/calendar_ui_demo_checklist.txt
+6.9 checkpoint_id: S5-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Calendar state is visible from the UI and one browser-triggered calendar path is testable.
+   7.2 patch_condition: Calendar remains banner-only, non-operable, or hidden behind non-UI setup ambiguity.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: CF-PREP
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S5
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: CF-PREP
+   6.2 stage_name: Cloudflare UI Deploy Prep
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Reconfirm the correct UI asset root and deploy target before live validation.
+   6.5 stage_inputs:
+   6.5.1 current wrangler config
+   6.5.2 resolved UI asset map
+   6.5.3 current Cloudflare worker/pages settings
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER A | CF-PREP | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Verify exact deploy root, UI asset path, build path, and live route expectations for the corrected browser UI.
+6.6.4 expected_artifacts:
+6.6.4.1 /job_site/cloudflare_prep_report.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.6.5.2 /job_site/ui_asset_map.txt
+6.6.6 repo_mirror_required: no
+6.6.7 commit_required: no
+6.6.8 push_required: no
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER B | CF-PREP | RESULT]
+6.7.2 expected_status: PASS
+6.7.3 task:
+6.7.3.1 Verify public route behavior for /, /health, /session/latest, /calendar/status, and the browser voice route.
+6.7.4 expected_artifacts:
+6.7.4.1 /job_site/cloudflare_route_matrix.txt
+6.7.5 required_references:
+6.7.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.7.5.2 /job_site/ui_asset_map.txt
+6.7.6 repo_mirror_required: no
+6.7.7 commit_required: no
+6.7.8 push_required: no
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/cloudflare_prep_report.txt
+6.8.2 /job_site/cloudflare_route_matrix.txt
+6.9 checkpoint_id: CF-PREP-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Deploy root, UI asset path, and live route expectations are explicit and current.
+   7.2 patch_condition: Asset root drift, wrong deploy path, or unresolved live route mapping.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: CF-TEST
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: CF-PREP
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: CF-TEST
+   6.2 stage_name: Cloudflare UI Deploy Test
+   6.3 stage_owner: Foreman A
+   6.4 stage_goal: Prompt operator to deploy and verify the corrected browser UI live before any more feature work.
+   6.5 stage_inputs:
+   6.5.1 current pushed branch and commit evidence
+   6.5.2 /job_site/cloudflare_prep_report.txt
+   6.5.3 /job_site/ui_shell_checklist.txt
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER A | CF-TEST | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Prepare the exact operator prompt to deploy now and verify live browser UI for chat, voice permission flow, and calendar surface using the declared routes.
+6.6.4 expected_artifacts:
+6.6.4.1 /job_site/cloudflare_operator_prompt.txt
+6.6.4.2 /job_site/cloudflare_test_evidence_index.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+6.6.6 repo_mirror_required: no
+6.6.7 commit_required: no
+6.6.8 push_required: no
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER B | CF-TEST | RESULT]
+6.7.2 expected_status:
+6.7.3 task:
+6.7.4 expected_artifacts:
+6.7.5 required_references:
+6.7.6 repo_mirror_required:
+6.7.7 commit_required:
+6.7.8 push_required:
+
+6.8 required_stage_artifacts:
+6.8.1 deployed_route
+6.8.2 screenshot_of_live_ui
+6.8.3 screenshot_of_voice_permission_flow
+6.8.4 screenshot_of_calendar_surface
+6.8.5 /job_site/cloudflare_operator_prompt.txt
+6.8.6 /job_site/cloudflare_test_evidence_index.txt
+6.9 checkpoint_id: CF-TEST-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Live UI evidence proves the corrected shell is deployed and testable for browser chat, voice permission, and calendar surface.
+   7.2 patch_condition: Live UI still shows stale shell, Talk does not request mic permission, or calendar surface is absent.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: CF-VERIFY
+   7.3.2 next_owner: Foreman B
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: CF-TEST
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: CF-VERIFY
+   6.2 stage_name: Cloudflare UI Checksum
+   6.3 stage_owner: Foreman B
+   6.4 stage_goal: Validate live deployed UI against the corrected shell contract.
+   6.5 stage_inputs:
+   6.5.1 live deployed UI evidence
+   6.5.2 /job_site/ui_shell_contract.txt
+   6.5.3 /job_site/browser_voice_contract.txt
+   6.5.4 /job_site/calendar_surface_contract.txt
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER A | CF-VERIFY | RESULT]
+6.6.2 expected_status:
+6.6.3 task:
+6.6.4 expected_artifacts:
+6.6.5 required_references:
+6.6.6 repo_mirror_required:
+6.6.7 commit_required:
+6.6.8 push_required:
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER B | CF-VERIFY | RESULT]
+6.7.2 expected_status:
+6.7.3 task:
+6.7.4 expected_artifacts:
+6.7.5 required_references:
+6.7.6 repo_mirror_required:
+6.7.7 commit_required:
+6.7.8 push_required:
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/cloudflare_checksum_result.txt
+6.9 checkpoint_id: CF-VERIFY-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: Live deployed UI matches the corrected shell contract and is testable from the browser.
+   7.2 patch_condition: Any critical control surface is missing, stale, or non-testable.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S7
+   7.3.2 next_owner: Foreman B
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: CF-TEST
+   7.4.2 return_owner: Foreman A
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. STAGE
+   6.1 stage_id: S7
+   6.2 stage_name: Final UI Checksum
+   6.3 stage_owner: Foreman B
+   6.4 stage_goal: Confirm all UI recovery artifacts and closeout inputs are present.
+   6.5 stage_inputs:
+   6.5.1 required stage artifacts
+   6.5.2 /job_site/stage_activity_log.txt
+   6.5.3 /job_site/cloudflare_checksum_result.txt
+
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER A | S7 | RESULT]
+6.6.2 expected_status:
+6.6.3 task:
+6.6.4 expected_artifacts:
+6.6.5 required_references:
+6.6.6 repo_mirror_required:
+6.6.7 commit_required:
+6.6.8 push_required:
+
+6.7 worker_b_order
+6.7.1 [EXEC-AI-STAGE4-UIFIX-002 | WORKER B | S7 | RESULT]
+6.7.2 expected_status:
+6.7.3 task:
+6.7.4 expected_artifacts:
+6.7.5 required_references:
+6.7.6 repo_mirror_required:
+6.7.7 commit_required:
+6.7.8 push_required:
+
+6.8 required_stage_artifacts:
+6.8.1 /job_site/final_checksum.txt
+6.9 checkpoint_id: S7-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition: All declared UI recovery artifacts and Cloudflare checksum inputs are present and aligned.
+   7.2 patch_condition: Missing artifact, wrong path, or unresolved live UI proof.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S8
+   7.3.2 next_owner: Factory Control Interface
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S7
+   7.4.2 return_owner: Foreman B
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. FINAL VALIDATION
+   8.1 required_inputs:
+   8.1.1 /job_site/stage_activity_log.txt
+   8.1.2 /job_site/final_checksum.txt
+   8.1.3 /job_site/cloudflare_checksum_result.txt
+   8.1.4 /job_site/ui_failure_lock.txt
+   8.1.5 /job_site/ui_shell_contract.txt
+   8.2 validation_check_1: Live deployed UI matches corrected shell and is not stale.
+   8.3 validation_check_2: Browser text path is testable and non-placeholder.
+   8.4 validation_check_3: Browser voice permission flow and one real capture path are testable; calendar surface is visible and operable.
+   8.5 outputs:
+   8.5.1 completion_status
+   8.5.2 /job_site/TPS_REPORT.txt
+   8.6 completion_status: COMPLETE on PASS
+
+9. FOREMAN OUTPUT FORM
+   9.1 job_id:
+   9.2 foreman:
+   9.3 current_stage:
+   9.4 current_pass:
+   9.5 next_stage:
+   9.6 next_owner:
+   9.7 passes_remaining:
+   9.8 status:
+   9.9 current_action:
+   9.10 artifacts:
+   9.11 checkpoint_result:
+   9.12 handoff_instruction:
+   9.13 issue:
+
+10. WORKER DISPATCH FORM
+    10.1 [PROJECT | WORKER | STAGE | RESULT]
+    10.2 expected_status:
+    10.3 task:
+    10.4 expected_artifacts:
+    10.5 required_references:
+    10.6 repo_mirror_required:
+    10.7 commit_required:
+    10.8 push_required:
+
+11. WORKER RESULT FORM
+    11.1 [PROJECT | WORKER | STAGE | RESULT]
+    11.2 status:
+    11.3 artifacts:
+    11.4 summary:
+    11.5 issues:
+
+12. TPS REPORT FORM
+    12.1 job_id:
+    12.2 completion_status:
+    12.3 job_summary:
+    12.4 stage_results:
+    12.5 artifact_summary:
+    12.6 patch_history:
+    12.7 closeout_note:
+    12.7.1 include repeat-loop variance note: earlier Stage 4 flow accepted worker claims without live UI proof; future runs must block completion until the deployed UI itself is operator-testable.
+
+13. REFERENCE MATERIAL
+    13.1 job_site: /job_site
+    13.2 target_file_system: [https://github.com/blackholecapital/ALI-ai/tree/main](https://github.com/blackholecapital/ALI-ai/tree/main)
+    13.3 factory_manual: /job_site/factory-manual-v1.1.txt
+    13.4 foreman_manual: /job_site/foreman-manual-v1.1.txt
+    13.5 worker_execution_manual: /job_site/worker-execution-manual-v1.1.txt
+    13.6 active_build_sheet: /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+    13.7 reference_repo_1:
+    13.7.1 url: [https://github.com/mckaywrigley/chatbot-ui](https://github.com/mckaywrigley/chatbot-ui)
+    13.7.2 reference_use: clean chat shell patterns and simple browser chat UX
+    13.8 reference_repo_2:
+    13.8.1 url: [https://github.com/iOfficeAI/AionUi](https://github.com/iOfficeAI/AionUi)
+    13.8.2 reference_use: visible agent-state and operator-facing action/status rendering
+    13.9 reference_repo_3:
+    13.9.1 url: [https://github.com/blackholecapital/ALI-ai](https://github.com/blackholecapital/ALI-ai)
+    13.9.2 reference_use: current codebase, asset paths, route contracts, and deploy target inspection
+    13.10 current_known_repo_findings:
+    13.10.1 apps, job_site, packages, worker-wb, and xyz-factory-system are present at repo root. ([GitHub][1])
+    13.10.2 the repo’s intended UI shell includes more controls than the currently shown live UI, indicating a likely deployed asset mismatch. ([GitHub][1])
+    13.10.3 this run’s recovery target is the live UI first; no further feature validation is accepted until the deployed UI is operator-testable.
+
+FORM LAW BLOCK
+L1. stage numbering must use S1, S2, S3 format only
+L2. field numbering must use 1.1, 1.2, 1.3 format only
+L3. foreman status values allowed: PASS | PATCH | ERROR
+L4. worker status values allowed: PASS | PATCH
+L5. unused fields must remain blank
+L6. do not delete fields from the template
+L7. all expected_artifacts must be exact target paths
+L8. worker dispatch tag must exactly match worker result tag format
+L9. required_references only in worker orders
+L10. all file writes must use declared target paths only
+
+[1]: https://github.com/blackholecapital/ALI-ai/tree/main "GitHub - blackholecapital/ALI-ai: ali - ai assistant rapid prototype run 4/16/26 · GitHub"
