@@ -1,0 +1,15 @@
+DEPLOY ROUTE LOCK
+job_id: EXEC-AI-STAGE4-UIFIX-002A
+stage: S1
+artifact: /job_site/deploy_route_lock.txt
+reference: /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+
+LOCKED ROUTE ASSUMPTIONS
+
+1. live_target_domain: ali-ai.xyz-labs.xyz
+
+2. wrangler_route_requirement: wrangler.jsonc must declare the intended route if custom-domain routing is required
+
+3. zone_name: xyz-labs.xyz
+
+4. ui_validation_gate: deployed UI validation is blocked until route mapping is explicit
