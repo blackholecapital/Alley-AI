@@ -26,7 +26,7 @@
 // for the POST path.
 const ENDPOINT = '/session/latest';
 const CALENDAR_ENDPOINT = '/calendar/status';
-const SEND_ENDPOINT = '/telegram/webhook';
+const SEND_ENDPOINT = '/ui/send';
 const POLL_MS = 5000;
 
 const DOM = {
