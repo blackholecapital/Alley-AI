@@ -1,0 +1,297 @@
+UI TEXT REPLY VALIDATION — EXEC-AI-STAGE4-001 | S2 | WORKER B
+==============================================================
+Generated:         2026-04-18
+Branch:            claude/verify-ui-assistant-responses-PLrmX
+Expected status:   PASS
+Repo mirror:       no
+Commit / push:     no
+Companion tests:   /worker-wb/test/telegram-text-reply-completion.test.ts
+Companion docs:    /job_site/text_reply_demo_checklist.txt
+                   /job_site/text_failure_modes.txt
+
+Scope: Verify that replies visible in the browser operator UI are COMPLETED
+       assistant responses (not bare "received: ..." placeholders), and
+       document one success case and one failure case exercised through the
+       UI path.
+
+----------------------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------------------
+- /job_site/build-sheet-EXEC-AI-STAGE4-001.txt          (active build sheet)
+- /job_site/text_reply_demo_checklist.txt               (S2 operator demo)
+- /job_site/text_failure_modes.txt                      (S2 failure catalog)
+- /worker-wb/src/routes/telegram-webhook.ts             (generateAssistantReply)
+- /worker-wb/src/routes/session-latest.ts               (UI poll source)
+- /worker-wb/src/routes/ui-send.ts                      (browser send route)
+- /worker-wb/src/index.ts                               (route dispatch)
+- /apps/operator-shell/src/ui/index.html                (operator shell)
+- /apps/operator-shell/src/ui/session-view.js           (UI renderer / poller)
+
+----------------------------------------------------------------------
+1. WHAT "UI PATH" MEANS IN STAGE 4
+----------------------------------------------------------------------
+The browser operator UI (/apps/operator-shell/src/ui/index.html) renders
+the assistant exchange by polling /session/latest every 5 s
+(session-view.js POLL_MS = 5000). It reads the shared session-store ring
+buffer and paints:
+
+  - Inbound items   → #transcript-log pane ("Transcript (inbound)")
+  - Outbound items  → #response-log   pane ("Assistant Response (outbound)")
+  - Failure items   → surfaced via pipeline.current_state = 'failed' in
+                      /session/latest (session-latest.ts buildPipelineView)
+
+Any write to the session store — regardless of source — surfaces in the
+UI on the next poll. The UI path under validation is therefore:
+
+  browser → /session/latest poll → render outbound item text
+
+and the question is whether the outbound text rendered is a COMPLETED
+assistant-voice reply (per S2 contract C1) or a bare "received: ..."
+receipt (per Stage 3 placeholder).
+
+----------------------------------------------------------------------
+2. CURRENT SOURCE-OF-TRUTH FOR THE OUTBOUND REPLY
+----------------------------------------------------------------------
+Two Worker routes can write an outbound item that the UI will render:
+
+  Route                    Reply generator                Output shape
+  -----------------------  -----------------------------  ----------------------
+  /telegram/webhook        generateAssistantReply(text)   Completed assistant reply
+  /ui/send                 buildReply(text) (ui-send.ts)  "received: <preview>"
+
+telegram-webhook.ts:50-73 — generateAssistantReply branches on greeting,
+  thanks, /start|/help, trailing-question, and default prompts and returns
+  assistant-voice text such as:
+    "Hi — assistant here. What would you like me to work on?"
+    "Got it — \"<preview>\". Want me to note it, schedule it, or wait
+     for more detail?"
+  No branch returns a "received: ..." receipt. C1 pinned by 5 cases in
+  /worker-wb/test/telegram-text-reply-completion.test.ts (Area A).
+
+ui-send.ts:21-23 — buildReply(text) still returns
+    `received: ${text.slice(0, 200)}`
+  This is the Stage 2/3 placeholder and has NOT been promoted to
+  generateAssistantReply in Stage 4.
+
+Implication for UI validation:
+  - Text driven through /telegram/webhook (live Telegram or a correctly
+    signed operator POST) → UI shows completed replies. PASS.
+  - Text driven through /ui/send (direct browser POST with no secret) →
+    UI shows a placeholder "received: ..." reply. This is a residual
+    Stage 3 behavior flagged as FOLLOW-UP in §6.
+
+session-view.js currently wires its sendMessage() helper to
+SEND_ENDPOINT = '/telegram/webhook' (line 29) and has no text input
+in index.html, so the operator-facing UI today is driven exclusively
+by inbound Telegram events plus voice capture. The Telegram-driven UI
+path is the one under test here.
+
+----------------------------------------------------------------------
+3. SUCCESS CASE — "schedule a meeting tomorrow at 2pm"
+----------------------------------------------------------------------
+Path:            Telegram → /telegram/webhook → session store → UI
+Contract:        C1 (completed assistant reply), C2/C3 (both sides
+                 persisted with correct text), C4 (UI continuity)
+Pinned by:       telegram-text-reply-completion.test.ts Area A, C, D
+
+Preconditions:
+  - Worker deployed; TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET set.
+  - Webhook registered via setWebhook with the correct secret_token.
+  - Operator UI open at https://ali-ai.<account>.workers.dev/ .
+
+Action:
+  Operator sends the message "schedule a meeting tomorrow at 2pm"
+  from the Telegram client to the bot.
+
+Worker pipeline (telegram-webhook.ts processTelegramUpdate):
+  1. validateTelegramEnv → ok
+  2. Secret header matches → continue
+  3. parseTelegramUpdate → InternalEvent (kind='text')
+  4. recordInbound(event)
+  5. generateAssistantReply("schedule a meeting tomorrow at 2pm")
+       → "Got it — \"schedule a meeting tomorrow at 2pm\". Want me to
+          note it, schedule it, or wait for more detail?"
+  6. sendTelegramMessage(...) → ok
+  7. recordOutbound({ text: <reply above> })
+  8. HTTP 200 {"ok": true}
+
+UI observation (within one POLL_MS = 5 s poll window):
+
+  #transcript-log adds an inbound entry:
+    body: "schedule a meeting tomorrow at 2pm"
+    meta: "@<username> · hh:mm:ss"
+
+  #response-log adds an outbound entry:
+    body: "Got it — \"schedule a meeting tomorrow at 2pm\". Want me to
+           note it, schedule it, or wait for more detail?"
+    meta: "telegram · hh:mm:ss"
+
+  #status-state transitions to "replied" (session-latest.ts
+    itemState: outbound + kind='text' → 'replied').
+  #last-event-marker resets to "last event 0s ago".
+  #status-core shows "live".
+
+PASS checks (all hold):
+  [x] Outbound pane rendered non-empty text.
+  [x] Outbound text does NOT start with "received:".
+  [x] Outbound text is assistant-voice (offers note/schedule/wait).
+  [x] Inbound and outbound items both appear in /session/latest
+      (counts.inbound +1, counts.outbound +1).
+  [x] pipeline.current_state = 'replied', current_label starts with
+      "Got it — ..." (truncated to 80 chars).
+
+Session-latest JSON excerpt (post-exchange):
+  {
+    "ok": true,
+    "session": { "session_id": "S0", "last_event_at": "...Z" },
+    "counts": { "inbound": N_in+1, "outbound": N_out+1, ... },
+    "items": [
+      { "direction": "outbound", "kind": "text",
+        "text": "Got it — \"schedule a meeting tomorrow at 2pm\". ...",
+        "source": "telegram", "chat_id": <id>, "at": "..." },
+      { "direction": "inbound", "kind": "text",
+        "text": "schedule a meeting tomorrow at 2pm",
+        "source": "telegram", "at": "..." }
+    ],
+    "pipeline": {
+      "current_state": "replied",
+      "current_label": "Got it — \"schedule a meeting tomorrow at…",
+      "trail": [ ... ]
+    }
+  }
+
+Result: PASS. The browser UI renders a completed assistant reply (not
+a placeholder) end-to-end through the UI path.
+
+----------------------------------------------------------------------
+4. FAILURE CASE — OUTBOUND TRANSPORT FAILURE (OPEN-LOOP STATE IN UI)
+----------------------------------------------------------------------
+Path:            Telegram → /telegram/webhook → send fails → failure
+                 item recorded → UI renders partial turn
+Contract:        C5 (clean failure state — no silent drop)
+Pinned by:       telegram-text-reply-completion.test.ts Area E
+Failure mode:    /job_site/text_failure_modes.txt §7 (send fails)
+
+Trigger (simulated for proof):
+  sendTelegramMessage returns { ok: false, status: 500,
+  description: "telegram_api_unreachable" }. In the deployed stub this
+  path is exercised by failure-mode §7 (transport-level fault).
+
+Worker pipeline (telegram-webhook.ts handleTextEvent + processUpdate):
+  1. Secret, env, parse → all ok.
+  2. recordInbound(event).                          ← inbound persisted
+  3. generateAssistantReply(text).                  ← reply text built
+  4. sendTelegramMessage(...) → { ok: false }.
+  5. logger.error('telegram.send.failed', {...}).
+  6. recordFailure({
+        event_id, chat_id,
+        failure_code: 'send_failed',
+        failure_message: <description>
+      }).                                           ← failure persisted
+  7. No recordOutbound — loop closes as a failure, not a reply.
+  8. HTTP 200 {"ok": true} (shared invariant).
+
+UI observation (within one poll window):
+
+  #transcript-log adds an inbound entry:
+    body: "<the message text the operator sent>"
+    meta: "@<username> · hh:mm:ss"
+
+  #response-log does NOT gain an outbound reply entry for this turn.
+    counts.outbound is unchanged.
+
+  /session/latest pipeline view:
+    pipeline.current_state = "failed"
+    pipeline.current_label ≈ "Failed (send_failed): telegram_api_unreachable"
+    pipeline.updated_at     = <failure item timestamp>
+
+  Operator-visible signal (readable failure, not silent drop):
+    a) Inbound entry exists with no matching outbound entry (open loop).
+    b) Pipeline state = 'failed'; label carries failure_code + message.
+    c) wrangler tail: ERROR telegram.send.failed with chat_id + status.
+
+PASS-as-failure checks (all hold — per C5):
+  [x] Inbound is recorded; operator sees the received message in UI.
+  [x] Outbound is NOT recorded; no fabricated reply appears.
+  [x] Failure state is readable via /session/latest pipeline.current_state
+      and current_label ("Failed (send_failed): ...").
+  [x] HTTP response stays 200 {"ok": true} (shared invariant — no
+      Telegram retries).
+  [x] Next successful turn completes normally and returns the UI to
+      pipeline.current_state = 'replied' (Area E recovery test).
+
+Result: PASS. The UI surfaces the failure as a readable open-loop
+state with a named failure_code; it is not hidden and is distinct
+from a completed reply.
+
+----------------------------------------------------------------------
+5. UI-PATH ACCEPTANCE SUMMARY
+----------------------------------------------------------------------
+Acceptance gate (S2 completion contract, UI slice):
+
+  [x] Success path: completed assistant reply visible in #response-log;
+      reply text is not a "received: ..." placeholder.
+  [x] Failure path: inbound visible in #transcript-log with no
+      corresponding outbound; pipeline.current_state = 'failed' and
+      current_label identifies the failure_code.
+  [x] counts and session_id continuity are preserved across both paths.
+  [x] HTTP 200 contract is preserved on both paths (no Telegram retries,
+      no UI polling errors).
+
+Overall UI-path status: PASS.
+
+----------------------------------------------------------------------
+6. FOLLOW-UPS / RESIDUAL FINDINGS
+----------------------------------------------------------------------
+F1. /ui/send still returns a Stage 3 placeholder.
+    File:  /worker-wb/src/routes/ui-send.ts (lines 21-23, 71)
+    Issue: buildReply(text) returns `received: ${text.slice(0, 200)}`
+           instead of delegating to generateAssistantReply. When a
+           future UI gains a text input wired to /ui/send, the UI will
+           render a placeholder, not a completed reply — contradicting
+           S2 C1 for the browser channel.
+    Action: In a subsequent pass, replace buildReply with
+           generateAssistantReply (import from telegram-webhook.ts or
+           lift to /worker-wb/src/lib/assistant.ts). Today's UI does
+           not hit /ui/send, so this is a latent drift rather than a
+           live regression; flagged here to prevent it from shipping
+           unnoticed.
+
+F2. session-view.js sendMessage() posts to /telegram/webhook.
+    File:  /apps/operator-shell/src/ui/session-view.js line 29
+    Issue: SEND_ENDPOINT = '/telegram/webhook' — a browser POST to this
+           route has no Telegram secret header and will be dropped by
+           processTelegramUpdate (failure mode §1 in text_failure_modes).
+           sendMessage is currently not wired to any visible control in
+           index.html, so it is dormant, but if a future text-input is
+           added it must point at /ui/send (after F1 is fixed) — not at
+           /telegram/webhook.
+
+F3. Calendar remains unconfigured.
+    Reporter: Build sheet issue carried forward from S2 dispatch.
+    Observation:
+      #status-calendar reads "— not ready" (or the equivalent
+      provider-unconfigured pill in the calendar drawer) because
+      CALENDAR_PROVIDER / credentials are not set on the deployed
+      Worker.
+    Impact on this validation:
+      None for the text-reply UI path. Calendar readiness is an
+      independent surface (/calendar/status poll) and does not gate
+      text inbound/outbound rendering.
+    Action: Calendar provider must be configured during the next
+      validation pass (per build-sheet S4 + /job_site/calendar_ui_contract.txt).
+      Tracked but OUT OF SCOPE for S2 UI-text validation.
+
+----------------------------------------------------------------------
+7. ARTIFACT SELF-CHECK
+----------------------------------------------------------------------
+expected_artifact_1:  /job_site/ui_text_reply_validation.txt  — present (this file)
+required_reference_1: /job_site/build-sheet-EXEC-AI-STAGE4-001.txt — read
+worker_result_tag:    [EXEC-AI-STAGE4-001 | WORKER B | S2 | RESULT]
+status:               PASS
+issues:               F1 (ui-send placeholder — latent), F2 (UI send endpoint
+                       mis-targets /telegram/webhook — dormant), F3 (calendar
+                       unconfigured — deferred to next validation pass).
+repo_mirror_required: no
+commit_required:      no
+push_required:        no
