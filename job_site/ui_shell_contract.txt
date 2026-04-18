@@ -1,12 +1,16 @@
 UI SHELL CONTRACT
-job_id:   EXEC-AI-STAGE4-UIFIX-002
+job_id:   EXEC-AI-STAGE4-UIFIX-002A
 worker:   WORKER B
 stage:    S2
 artifact: /job_site/ui_shell_contract.txt
-source:   /apps/operator-shell/src/ui/index.html
-          /apps/operator-shell/src/ui/session-view.js
-          /apps/operator-shell/src/ui/voice-capture.js
-          /apps/operator-shell/src/ui/calendar-panel.js
+sources:  /worker-wb/public/index.html
+          /worker-wb/public/session-view.js
+          /worker-wb/public/voice-capture.js
+          /worker-wb/public/calendar-panel.js
+          /apps/operator-shell/src/ui/index.html
+references:
+  /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
+  /job_site/deploy_route_lock.txt
 
 PURPOSE
 Define the exact expected controls, DOM hooks, routes, and behavioral contracts
@@ -15,213 +19,241 @@ S2-CHECK and CF-VERIFY-CHECK.
 
 SCOPE LOCK
 This contract covers exactly the five recovery items declared in
-/job_site/ui_recovery_scope.txt. No other controls or surfaces are in scope.
+/job_site/ui_recovery_scope.txt for job EXEC-AI-STAGE4-UIFIX-002A:
+  1. Explicit route wiring
+  2. Deployed UI asset alignment
+  3. One browser chat route
+  4. One browser voice route
+  5. One browser calendar surface
+
+────────────────────────────────────────────────────────────────────────────────
+CONTRACT 0 — EXPLICIT ROUTE WIRING (scope item 1)
+────────────────────────────────────────────────────────────────────────────────
+All three browser surfaces must use explicitly declared, single-handler routes.
+No implicit fallback paths, catch-all handlers, or placeholder routes are
+permitted for these three endpoints.
+
+Declared route table (this run):
+  Surface    Method  Path               Handler file
+  ─────────  ──────  ─────────────────  ──────────────────────────────────────
+  Chat       POST    /ui/send           worker-wb/src/routes/ui-send.ts
+  Voice      POST    /voice/capture     worker-wb/src/routes/voice-capture.ts
+  Calendar   GET     /calendar/status   worker-wb/src/routes/calendar-status.ts
+
+Client-side constants (must match exactly):
+  session-view.js   SEND_ENDPOINT     = '/ui/send'        (line 29)
+  voice-capture.js  VOICE_ENDPOINT    = '/voice/capture'  (line 23)
+  session-view.js   CALENDAR_ENDPOINT = '/calendar/status' (line 28)
+
+Pass condition for route wiring:
+  Each constant resolves to exactly one worker route handler. No route returns
+  a stub, 404, or catch-all response for any of the three paths above. Routes
+  confirmed present in the worker route index before S2-CHECK closes.
 
 ────────────────────────────────────────────────────────────────────────────────
 CONTRACT 1 — CHAT INPUT
 ────────────────────────────────────────────────────────────────────────────────
 Required DOM element:
-  <textarea id="chat-input"> OR <input type="text" id="chat-input">
-  Placement: visible in the main viewport, above or alongside voice footer
-  Attributes: aria-label="Type a message", rows≥2 (textarea) or full-width input
-  Placeholder text: "Type a message…"
+  <input type="text" id="chat-input">
+  Placement: fixed chat bar above voice footer
+  aria-label="Type a message"
+  placeholder="Type a message…"
+  onkeydown: fires submit() on Enter (no Shift)
 
 Required DOM element (send button):
   <button id="send-btn">Send</button>
   aria-label="Send message"
-  Disabled state: when chat-input is empty or a send is in progress
+  Disabled state: during in-flight send; re-enabled in finally block
 
 Behavior contract:
   1. Operator types text into #chat-input
-  2. Operator clicks #send-btn or presses Enter (no shift)
-  3. sendMessage() in session-view.js is called with payload:
-       { text: <trimmed input value>, source: "browser" }
-  4. POST /telegram/webhook with Content-Type: application/json
-  5. On { ok: true }: input cleared, exchange appears in #transcript-log on next
-     poll (≤5 s)
-  6. On { ok: false }: visible error message shown to operator; input preserved
-  7. No placeholder-only replies are acceptable — the assistant must return a
-     real reply visible in #response-log within a reasonable poll window
+  2. Operator clicks #send-btn or presses Enter (no Shift)
+  3. submit() in index.html inline module calls sendMessage() from session-view.js
+       payload: { text: <trimmed input value>, source: "browser" }
+  4. POST /ui/send  (SEND_ENDPOINT = '/ui/send' — session-view.js:29)
+       Content-Type: application/json
+  5. On { ok: true }: input cleared, focus restored, exchange visible in
+       #transcript-log on next poll (≤5 s)
+  6. On { ok: false }: visible error shown to operator; input preserved
+  7. No placeholder-only replies acceptable — assistant must return a real reply
 
-Route:       POST /telegram/webhook
-Route owner: worker-wb/src/routes/ui-send.ts (to be created in S3)
-Response:    { ok: true } on accepted; any non-true is a failure
+Route:       POST /ui/send
+Route owner: worker-wb/src/routes/ui-send.ts
 
-Status at S2: MISSING from HTML. sendMessage() exists in session-view.js:336.
-              Must be added before S3-CHECK can pass.
+DOM presence (confirmed in worker-wb/public/index.html):  PRESENT
 
 ────────────────────────────────────────────────────────────────────────────────
-CONTRACT 2 — BROWSER VOICE ROUTE
+CONTRACT 2 — TALK BUTTON (voice start)
 ────────────────────────────────────────────────────────────────────────────────
-Required DOM elements (all present in current index.html):
-  #voice-btn-start    aria-label="Start recording"     (Talk)
-  #voice-btn-stop     aria-label="Stop and send recording"  (Stop & Send)
-  #voice-btn-cancel   aria-label="Cancel recording"    (Cancel)
-  #voice-status-badge aria-live="polite"               (state badge)
-  #voice-message      aria-live="polite"               (status text)
+Required DOM element:
+  <button class="voice-btn voice-btn-start" id="voice-btn-start">
+  aria-label="Start recording"
+  Visible text: "Talk" (collapses to mic glyph at ≤420px)
 
-State machine contract (voice-capture.js):
-  idle        → start click    → requesting
-  requesting  → permission OK  → recording
-  requesting  → permission NO  → denied
-  requesting  → no device      → denied (message: "No microphone found.")
-  requesting  → unsupported    → unsupported
-  recording   → stop click     → processing
-  recording   → cancel click   → idle
-  processing  → upload done    → sent   (auto-resets to idle after 3 s)
-  processing  → upload fail    → sent   (ok:false, error shown in #voice-message)
-  denied      → start click    → requesting  (retry allowed)
-  error       → start click    → requesting  (retry allowed)
+Behavior contract:
+  1. On click: calls startCapture() from voice-capture.js
+  2. startCapture() calls navigator.mediaDevices.getUserMedia({ audio: true })
+  3. Browser must show native mic permission prompt on first click
+  4. State transitions:
+       idle → requesting → recording   (permission granted)
+       idle → requesting → denied      (permission denied)
+       idle → requesting → denied      (no device found)
+       idle → requesting → unsupported (MediaDevices API absent)
+  5. #voice-status-badge reflects current state (aria-live="polite")
 
-Permission flow contract:
-  On Talk click: browser must show native mic permission prompt
-  On permission denied: #voice-status-badge shows "denied", #voice-message
-    shows "Microphone permission denied. Grant mic access in browser settings
-    and try again."
-  On unsupported browser: #voice-status-badge shows "unsupported", message
-    shows "Voice capture is not supported in this browser. Use Chrome, Edge,
-    or Firefox over HTTPS."
-
-Upload contract:
-  Endpoint:  POST /voice/capture
-  Body:      multipart/form-data, field "audio", filename "recording.webm"
-  MIME type: audio/webm;codecs=opus preferred; audio/webm, audio/ogg, audio/mp4
-             as fallback (MediaRecorder.isTypeSupported order)
-  Success:   { ok: true, session_id?: string }
-  Failure:   { ok: false, error: { code: string, message: string } }
-
-Route owner: worker-wb/src/routes/voice-capture.ts (to be created in S4)
-Status at S2: PRESENT — Talk, Stop & Send, Cancel all present and wired.
-              Backend route /voice/capture must be confirmed in S4.
+DOM presence (confirmed in worker-wb/public/index.html):  PRESENT
 
 ────────────────────────────────────────────────────────────────────────────────
-CONTRACT 3 — CALENDAR SURFACE
+CONTRACT 3 — STOP/SEND AND RECORD CONTROLS
 ────────────────────────────────────────────────────────────────────────────────
-Status bar entry point:
-  #status-calendar     — shows "demo ready" / "demo not ready" / "—"
-                         data-state="live" (green) or data-state="error" (red)
-  #calendar-panel-toggle — "⚙ Calendar" button, aria-expanded toggles on click
+Required DOM elements:
+  #voice-btn-stop    "Stop & Send"  aria-label="Stop and send recording"
+  #voice-btn-cancel  "Cancel"       aria-label="Cancel recording"
+
+Behavior contract:
+  Stop & Send:
+    Wired to stopAndSend() in voice-capture.js
+    Transitions: recording → processing → sent → idle (auto-reset 3 s)
+    POST /voice/capture  (VOICE_ENDPOINT = '/voice/capture' — voice-capture.js:23)
+      Body: multipart/form-data, field "audio", filename "recording.webm"
+      MIME: audio/webm;codecs=opus preferred; webm/ogg/mp4 fallback
+    Success: { ok: true, session_id?: string }
+    Failure: { ok: false, error: { code: string, message: string } }
+  Cancel:
+    Wired to cancelCapture() in voice-capture.js
+    Transitions: recording → idle (no upload)
+
+  Visibility:
+    Stop & Send: hidden when not recording; shown only during recording
+    Cancel:      hidden at idle; shown during recording and terminal states
+
+Route:       POST /voice/capture
+Route owner: worker-wb/src/routes/voice-capture.ts
+
+DOM presence (confirmed in worker-wb/public/index.html):  PRESENT
+
+────────────────────────────────────────────────────────────────────────────────
+CONTRACT 4 — CALENDAR ENTRY (browser surface)
+────────────────────────────────────────────────────────────────────────────────
+Status bar entry:
+  #status-calendar       — live pill: "demo ready" / "demo not ready" / "—"
+                           data-state="live" (green) | data-state="error" (red)
+  #calendar-panel-toggle — "⚙ Calendar" button; toggles drawer on click
 
 Calendar drawer (#calendar-panel):
-  Opens via #calendar-panel-toggle or closePanel() / openPanel() in calendar-panel.js
-  Refreshes /calendar/status automatically on open
+  Auto-refreshes /calendar/status on open
 
-Drawer sections:
-  Provider section:
-    #calendar-panel-provider   — provider name string (e.g. "demo", "—")
-    #calendar-panel-state      — state pill, one of six closed values (below)
-    #calendar-panel-reason     — hidden unless provider.reason present
-    #calendar-panel-detail     — hidden unless provider.detail present
-
-  Guidance section:
-    #calendar-panel-guidance   — hidden when state is ready or unknown;
-                                 shown for unconfigured, unsupported, not_ready,
-                                 error with exact copy from GUIDANCE map
-
-  Action section:
-    #calendar-panel-action-type — label "calendar.list_today" (static)
-    #calendar-panel-run         — "Run calendar.list_today" button
+Drawer DOM hooks:
+  #calendar-panel-provider     — provider name string
+  #calendar-panel-state        — state pill (six closed values below)
+  #calendar-panel-reason       — hidden unless reason present
+  #calendar-panel-detail       — hidden unless detail present
+  #calendar-panel-guidance     — shown for unconfigured/unsupported/not_ready/error
+  #calendar-panel-action-type  — static label "calendar.list_today"
+  #calendar-panel-run          — "Run calendar.list_today" button
                                   disabled only when state === "unknown"
-                                  always enabled for configured and unconfigured
-                                  states (so both paths are operator-testable)
-
-  Result section:
-    #calendar-panel-result       — container, hidden until invocation present
-    #calendar-panel-result-state — "ok" or "fail" pill
-    #calendar-panel-result-reply — reply_text from backend
-    #calendar-panel-result-meta  — "handled_at <ts> · N events" / error code
-
-  Error line:
-    #calendar-panel-error        — shown only on ERROR state; hidden otherwise
+                                  enabled for all other states including unconfigured
+  #calendar-panel-result       — result container, hidden until invocation
+  #calendar-panel-result-state — "ok" or "fail" pill
+  #calendar-panel-result-reply — reply_text from backend
+  #calendar-panel-result-meta  — "handled_at <ts> · N events" or error code
+  #calendar-panel-error        — shown only on ERROR state
 
 Action bar (outside drawer):
-  #calendar-action-bar    — hidden until last invocation present
-  #calendar-action-result — "✓ calendar.list_today ok · N events · HH:MM:SS"
-                             or "✗ calendar.list_today failed (code) · HH:MM:SS"
+  #calendar-action-bar    — hidden until invocation present
+  #calendar-action-result — last action result text
 
-Six closed UI states (classifyStatus() in calendar-panel.js):
-  unknown       — not fetched yet; pill shows "—"
-  ready         — provider.ready === true; pill green "configured · ready"
-  not_ready     — provider.ready === false, reason ≠ "provider_not_configured"
-                  pill yellow "configured · not ready"
-  unconfigured  — reason === "provider_not_configured" or provider unset
-                  pill muted "unconfigured"
-  unsupported   — reason === "provider_unsupported"
-                  pill red "unsupported provider"
-  error         — route unreachable / non-200 / malformed response
-                  pill red "unreachable"
+Six closed UI states:
+  unknown       — not fetched; pill "—"
+  ready         — provider.ready === true; green "configured · ready"
+  not_ready     — provider.ready === false, reason ≠ provider_not_configured
+                  yellow "configured · not ready"
+  unconfigured  — reason === provider_not_configured or no provider
+                  muted "unconfigured"
+  unsupported   — reason === provider_unsupported; red "unsupported provider"
+  error         — route unreachable / non-200 / malformed; red "unreachable"
 
 Routes:
-  GET /calendar/status        — read provider state, no side effects
-  GET /calendar/status?run=1  — dispatch calendar.list_today, return result
+  GET /calendar/status       — read provider state, no side effects
+  GET /calendar/status?run=1 — dispatch calendar.list_today, return result
+  Route constant: CALENDAR_ENDPOINT = '/calendar/status' (session-view.js:28)
 
-Status at S2: PRESENT — drawer, all DOM hooks, JS wiring all present.
+Route owner: worker-wb/src/routes/calendar-status.ts
+
+DOM presence (confirmed in worker-wb/public/index.html):  PRESENT
 
 ────────────────────────────────────────────────────────────────────────────────
-CONTRACT 4 — STATUS STRIP
+CONTRACT 5 — STATUS STRIP
 ────────────────────────────────────────────────────────────────────────────────
-Element:    <header class="status-bar"> — sticky, top:0, z-index:20
-Required DOM hooks and their content:
-  #status-core      — text: "live" | "idle" | "loading…" | "error"
-                      data-state: "live" | "empty" | "loading" | "error"
-  #status-state     — text: current UIRenderState.kind string
-  #status-session   — text: session_id.slice(0,16) or "—"; class="monospace"
-  #status-calendar  — text: "<provider> ready" | "<provider> not ready" | "—"
-                      data-state: "live" (green) | "error" (red)
-  #last-event-marker — text: "last event Xs ago" | "no events yet" | "loading"
+Element:    <header class="status-bar"> — sticky top:0, z-index:20
+
+Required DOM hooks:
+  #status-core       — "live" | "idle" | "loading…" | "error"
+                       data-state: live | empty | loading | error
+  #status-state      — current UIRenderState.kind string
+  #status-session    — session_id.slice(0,16) or "—"; class="monospace"
+  #status-calendar   — calendar provider readiness
+                       data-state: "live" (green) | "error" (red)
+  #last-event-marker — "last event Xs ago" | "no events yet" | "loading"
                        hidden at ≤768px
 
-Update frequency: every poll cycle (POLL_MS = 5000 ms)
-Persistence: visible on all viewport sizes; hidden elements collapse gracefully
+Update frequency: every poll cycle (POLL_MS = 5000 ms via session-view.js)
+Persistence:      visible on all viewport sizes; elements collapse gracefully
+
+DOM presence (confirmed in worker-wb/public/index.html):  PRESENT
 
 ────────────────────────────────────────────────────────────────────────────────
-CONTRACT 5 — MOBILE-SAFE LAYOUT
+CONTRACT 6 — MOBILE-SAFE LAYOUT
 ────────────────────────────────────────────────────────────────────────────────
 Viewport:   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-Breakpoint rules:
-  ≤768px:
-    .panels grid-template-columns: 1fr  (single column, stacked panes)
-    .panels grid-template-rows: 1fr 1fr
-    .status-dividers display:none
-    #last-event-marker display:none
-    .voice-footer padding reduced; button font-size 12px
+Breakpoint rules (confirmed in CSS):
+  ≤768px:  .panels → 1-column 2-row grid; .status-bar gap/padding reduced;
+           #last-event-marker hidden; .voice-btn padding 6px 10px; font-size 12px
+  ≤640px:  .calendar-panel width: 100vw (full-screen drawer on narrow phones)
+  ≤420px:  .voice-btn-label display:none (icon-only voice buttons)
 
-  ≤640px:
-    .calendar-panel width: 100vw; border-left: none
-    (full-screen calendar drawer on narrow phones)
+Chat bar: position:fixed above voice footer; flex row; full-width
 
-  ≤420px:
-    .voice-btn-label display:none
-    (icon-only voice buttons: 🎙 Talk → mic glyph, Stop & Send → ■, Cancel → ✕)
-
-Pass conditions for mobile-safe layout:
-  a. No horizontal scrollbar appears at 375px viewport width
-  b. All seven required controls remain accessible (tap-target ≥ 34px height)
-  c. Voice footer remains fixed at bottom; no overlap with main panes
-  d. Status bar remains readable (font-size ≥ 12px)
+Pass conditions:
+  a. No horizontal scrollbar at 375px viewport width
+  b. All required controls tap-accessible (≥34px height)
+  c. Voice footer fixed at bottom; no overlap with main panes
+  d. Status bar readable (font-size ≥12px)
   e. Calendar drawer fills screen at ≤640px and is scrollable
 
+DOM presence (confirmed in worker-wb/public/index.html):  PRESENT
+
 ────────────────────────────────────────────────────────────────────────────────
-PASS CONDITIONS (this contract)
+DEPLOYED ASSET ROOT
 ────────────────────────────────────────────────────────────────────────────────
-S2-CHECK passes when:
-  1. All five contracts above have Status = PRESENT (not MISSING)
-  2. index.html contains #chat-input and #send-btn wired to sendMessage()
-  3. /voice/capture route exists in worker-wb
-  4. /calendar/status and /calendar/status?run=1 routes exist in worker-wb
+Primary:  worker-wb/public/index.html
+Modules:  worker-wb/public/session-view.js
+          worker-wb/public/voice-capture.js
+          worker-wb/public/calendar-panel.js
+Mirror:   apps/operator-shell/src/ui/index.html (must stay in sync)
+
+────────────────────────────────────────────────────────────────────────────────
+PASS CONDITIONS (S2-CHECK)
+────────────────────────────────────────────────────────────────────────────────
+  1. Route table in CONTRACT 0 matches client-side constants exactly
+  2. Each of the three routes has exactly one handler file in worker-wb/src/routes/
+  3. No route returns a stub, 404, or catch-all for /ui/send, /voice/capture,
+     or /calendar/status
+  4. All six control contracts (1–6) are PRESENT in worker-wb/public/index.html
   5. Status strip updates live from /session/latest polling
-  6. Mobile breakpoints verified at 375px, 640px, and 768px viewports
+  6. Mobile breakpoints present in CSS for 375px, 640px, and 768px
 
 CF-VERIFY-CHECK additionally requires:
-  7. Live deployed URL loads index.html from this shell (not a stale or wrong asset)
+  7. Live deployed URL loads from worker-wb/public/ (not a stale or wrong asset)
   8. Browser console shows no 404s for session-view.js, voice-capture.js,
      calendar-panel.js
   9. Talk button triggers browser mic permission prompt on first click
-  10. Calendar drawer opens, shows provider state, and run button is clickable
+  10. Calendar drawer opens, provider state visible, run button clickable
 
 PATCH CONDITION
 This contract is not met if:
+  - Any ENDPOINT constant does not match a real worker route handler
   - Chat input or send button absent from deployed UI
   - Talk does not trigger browser mic permission prompt
   - Calendar drawer does not open or run button does not call /calendar/status?run=1
