@@ -1,0 +1,274 @@
+UI STAGE 4 DIRECTION — EXEC-AI-STAGE4-001 | S5 | WORKER A
+=============================================================
+Generated: 2026-04-18
+Branch:    claude/add-calendar-settings-3iOUJ
+Scope:     Stage 4 UI completion pass applied to
+           /apps/operator-shell/src/ui/*. Targeted styling and
+           responsive pass only — no structural redesign, no new
+           DOM hooks, no new worker routes.
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/Build Sheet — EXEC-AI-STAGE4-001.txt
+    13.7  reference_repo_1 — linuz90/claude-telegram-bot
+          (Telegram chat cadence, reply completion rendering)
+    13.8  reference_repo_2 — permaevidence/ConciergeforTelegram
+          (operator-facing calendar boundary + action rendering)
+    13.9  reference_repo_3 — iOfficeAI/AionUi
+          (clean agent UI, visible action/state rendering,
+           desktop/mobile adaptation)
+- /job_site/calendar_ui_contract.txt (S4 Worker A)
+- /job_site/voice_capture_contract.txt (S3 Worker A)
+- /job_site/ui_state_contract.txt (Stage 3)
+- /apps/operator-shell/src/ui/index.html
+- /apps/operator-shell/src/ui/session-view.js
+- /apps/operator-shell/src/ui/voice-capture.js
+- /apps/operator-shell/src/ui/calendar-panel.js
+
+NOTE: /job_site/reference_repo_matrix.txt (Stage 4 S1 Worker B)
+      is not present on disk. The reference mapping pinned here
+      draws directly from section 13 of the build sheet; treat as
+      provisional until the matrix ships. Flag only.
+
+----------------------------------------------------------
+1. STAGE 5 WORKER A SCOPE LOCK
+----------------------------------------------------------
+Build sheet 6.6.3.1 (S5 Worker A):
+  "Apply a clean, minimal UI pass inspired by selected reference
+   patterns: simple chat surface, obvious voice button, obvious
+   calendar entry point, mobile-friendly layout, and clear
+   action/status states."
+
+IN-SCOPE (this direction pins exactly these):
+
+  L1. Visual polish of the existing /apps/operator-shell/src/ui
+      shell. No files added, no files removed, no DOM hook renames.
+
+  L2. Chat surface: two panes (inbound transcript, outbound
+      assistant response) remain the primary surface. Colour-coded
+      pane-label dots restate the direction at a glance.
+
+  L3. Voice button: Talk is the primary action — accent-coloured
+      pill with mic glyph. Stop & Send keeps danger styling;
+      Cancel stays muted. All three collapse to icon-only on very
+      narrow viewports.
+
+  L4. Calendar entry point: the status-bar #calendar-panel-toggle
+      is restyled as an accent pill so it reads as a button, not as
+      another status value. Target tap size ≥ 34 px.
+
+  L5. Mobile-friendly layout: stacked panes below 768 px, compact
+      status row, trimmed voice footer padding, full-width calendar
+      drawer below 640 px, icon-only voice buttons below 420 px.
+
+  L6. Clear action/status states: every state pill (session state,
+      voice state, calendar state, calendar action result, calendar
+      panel state) uses the shared colour tokens pinned in
+      section 3. Meaning stays consistent across surfaces:
+        green  = live / ok / ready
+        amber  = loading / warn / not-ready / unconfigured
+        red    = error / fail / unsupported / denied
+        grey   = idle / unknown / muted
+
+OUT-OF-SCOPE (rejected for Stage 4 Worker A):
+  - New modes, routes, or action types.
+  - Theme switcher, accent-colour picker, density toggle.
+  - Any change to session-view.js, voice-capture.js, or
+    calendar-panel.js behaviour (styling-only pass).
+  - Any change to /worker-wb (server routes are frozen by S2/S3/S4).
+  - Accessibility features beyond existing aria wiring (e.g. focus
+    trap, Escape-to-close drawer) — deferred if needed.
+
+----------------------------------------------------------
+2. REFERENCE MAPPING (provisional)
+----------------------------------------------------------
+Until /job_site/reference_repo_matrix.txt ships this direction
+pulls from build-sheet section 13:
+
+  AionUi           → pane-header dot cue, accent-pill primary
+                     buttons, muted/accent surface hierarchy.
+  Concierge        → calendar-action result bar shape, operator
+                     guidance copy tone.
+  claude-telegram  → conversational transcript cadence (inbound
+                     left-accent, outbound ok-accent).
+
+No assets, code, or licences are imported from these repositories;
+the patterns are re-expressed as CSS tokens in the operator shell.
+
+----------------------------------------------------------
+3. DESIGN TOKENS (CSS variables, pinned)
+----------------------------------------------------------
+Declared at `:root` in /apps/operator-shell/src/ui/index.html.
+Do not introduce new tokens without updating this section.
+
+  --header-h     42px    status bar height
+  --footer-h     52px    voice footer height
+  --accent       #4da3ff primary affordance (Talk, Calendar button,
+                         Run button, inbound pane dot)
+  --accent-soft  #1a2d3d accent button background
+  --ok           #7cdc7c live / ok / ready / outbound pane dot
+  --ok-soft      #1a3d1f ok pill background
+  --warn         #f0c674 loading / not-ready / unconfigured
+  --warn-soft    #3d2a1a warn pill background
+  --bad          #ff6b6b error / fail / unsupported / denied
+  --bad-soft     #3d1f1f bad pill background
+  --rec          #ff6b6b recording indicator
+  --bg           #0f1115 page background
+  --surface      #15181e pane / drawer background
+  --surface-2    #1a1d23 status / footer / result card background
+  --line         #2a2d34 hairline borders + neutral pill background
+  --line-2       #3a3d44 stronger border (voice buttons)
+  --text         #e6e8eb primary text
+  --text-dim     #a5a9b3 secondary text
+  --text-muted   #6b6f78 placeholders / meta / guidance
+
+Fixed heights (--header-h, --footer-h) are consumed by the panels
+grid (`height: calc(100vh - var(--header-h) - var(--footer-h))`)
+and the calendar drawer. Changing them requires updating both.
+
+----------------------------------------------------------
+4. RESPONSIVE RULES (pinned)
+----------------------------------------------------------
+Desktop (>= 769 px)
+  - Two-column panel grid (1fr 1fr).
+  - Full status bar with Core | State | Session | Calendar + toggle
+    + last-event-marker.
+  - Voice footer: badge + Talk + (Stop & Send | Cancel) + message.
+  - Calendar drawer: 380 px wide, docked right.
+
+Tablet / narrow desktop (<= 768 px)
+  - Panels stack vertically (two rows).
+  - Status bar compresses: dividers hidden, last-event-marker
+    hidden (state pill + calendar status still visible).
+  - Voice footer: reduced horizontal padding.
+
+Phone (<= 640 px)
+  - Calendar drawer goes full-screen (width: 100vw, no left border).
+
+Small phone (<= 420 px)
+  - Voice button text labels collapse to icon-only via
+    `.voice-btn-label { display: none }`. Icons and aria-labels
+    keep the buttons identifiable and screen-reader-correct.
+
+Horizontal-scroll fallback: the status bar uses `overflow-x: auto`
+so any extreme label drift degrades gracefully instead of
+truncating.
+
+----------------------------------------------------------
+5. SURFACE-BY-SURFACE SPEC
+----------------------------------------------------------
+Each surface is listed with the DOM hooks it owns (unchanged) and
+the styling rules applied in this pass.
+
+5A. Status bar  (header.status-bar)
+    Hooks (S3/S4, kept): #status-core, #status-state,
+      #status-session, #status-calendar, #calendar-panel-toggle,
+      #last-event-marker.
+    Pass: sticky top, compact typography, consistent state colours
+      via .status-value[data-state]. The calendar toggle becomes an
+      accent pill so it reads as a CTA.
+
+5B. Chat surface  (main.panels)
+    Hooks (S3, kept): #pane-transcript, #pane-response,
+      #transcript-log, #response-log, .entry, .entry-body,
+      .entry-meta, .entry-kind-badge.
+    Pass: 2-column on desktop, 2-row on mobile. Each pane header
+      gains a colour dot (accent = inbound, ok = outbound) so the
+      two directions register without reading the label.
+
+5C. Calendar drawer  (aside#calendar-panel)
+    Hooks (S4 Worker A, kept): see /job_site/calendar_ui_contract.txt
+      section 5.
+    Pass: shares the new token palette; width collapses to 100 vw
+      at ≤ 640 px; state pill and run button use shared colours.
+    Entry point: status-bar .status-btn above is restyled as an
+      obvious, always-visible "⚙ Calendar" pill.
+
+5D. Voice footer  (footer.voice-footer)
+    Hooks (S3, kept): #voice-status-badge, #voice-btn-start,
+      #voice-btn-stop, #voice-btn-cancel, #voice-message.
+    Pass: Talk becomes the accent primary action (`.voice-btn-start`
+      class added). Labels wrapped in `.voice-btn-label` so the
+      three buttons gracefully collapse to icon-only under 420 px
+      while preserving aria-labels. Footer height lifted to 52 px
+      for comfortable tap targets on mobile (header+footer reserved
+      space in the panels grid updated to match).
+
+5E. Calendar action bar  (div#calendar-action-bar)
+    Hooks (S3 Worker B, kept): #calendar-action-bar,
+      #calendar-action-result.
+    Pass: colour tokens swapped for the shared palette; default
+      still hidden, unchanged behaviour.
+
+----------------------------------------------------------
+6. STATE-COLOUR CONTRACT (cross-surface)
+----------------------------------------------------------
+The same colour means the same thing everywhere.
+
+  live / ready / ok      → green (--ok)
+  loading / not-ready /
+   unconfigured / warn   → amber (--warn)
+  error / fail /
+   unsupported / denied  → red (--bad)
+  idle / empty / unknown → grey (--text-dim)
+
+This applies to:
+  #status-core  [data-state]
+  #status-calendar [data-state]
+  .voice-status-badge [data-state]
+  .cp-state-pill [data-state]
+  .cp-result-state [data-state]
+  .calendar-action-result [data-state]
+
+----------------------------------------------------------
+7. ACCEPTANCE GATES (for S5 Worker A checkpoint)
+----------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] /apps/operator-shell/src/ui/index.html loads and renders on
+      desktop with Core/State/Session/Calendar status + panes +
+      voice footer + calendar drawer.
+  [ ] Chat surface is two-column at >= 769 px, stacked at <= 768 px.
+  [ ] Talk button is visually the primary control (accent colour,
+      distinct from Stop & Send / Cancel).
+  [ ] #calendar-panel-toggle reads as a button (accent pill), not
+      as a passive status item.
+  [ ] All state pills share the colour semantics in section 6.
+  [ ] No DOM hook was renamed or removed.
+  [ ] No worker-side file was modified.
+  [ ] Repo mirrored, committed, and pushed to
+      claude/add-calendar-settings-3iOUJ.
+
+PATCH conditions (any one fails):
+  [ ] Structural change to panes, status bar, or voice footer.
+  [ ] A DOM hook relied on by session-view.js, voice-capture.js, or
+      calendar-panel.js was renamed, removed, or re-scoped.
+  [ ] Mobile view hides critical state (session id, calendar state,
+      voice status badge) instead of compacting it.
+  [ ] Accent colour misapplied (Talk no longer primary, or calendar
+      toggle loses button affordance).
+  [ ] New routes / action types / feature flags introduced.
+
+----------------------------------------------------------
+8. ARTIFACT SELF-CHECK
+----------------------------------------------------------
+expected_artifact_1: /apps/operator-shell/src/*               — present
+                     (index.html restyled; session.contract.ts,
+                      session-view.js, voice-capture.js,
+                      calendar-panel.js unchanged by this pass)
+expected_artifact_2: /job_site/ui_stage4_direction.txt         — present (this file)
+repo_mirror_required: yes — written to /home/user/ALI-ai working tree
+commit_required:      yes — to be committed on claude/add-calendar-settings-3iOUJ
+push_required:        yes — to be pushed to origin
+
+----------------------------------------------------------
+9. ISSUES / FLAGS
+----------------------------------------------------------
+- /job_site/reference_repo_matrix.txt not found on disk. Stage 4
+  build-sheet section 13 was used as the reference source; update
+  this direction once the matrix ships.
+- Voice footer height changed from 44 px to 52 px to accommodate
+  mobile tap-targets. Header+footer reserved space in the .panels
+  grid was updated to match; no JS consumer reads these heights.
+- Escape-to-close for the calendar drawer is deliberately NOT added
+  here to keep S5 scope minimal. May be layered in a later pass.
