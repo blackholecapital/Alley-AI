@@ -1,0 +1,32 @@
+UI ASSET MAP
+job_id: EXEC-AI-STAGE4-UIFIX-002
+stage: S2
+produced_by: WORKER A
+
+SOURCE (canonical Stage 4 shell)
+  /apps/operator-shell/src/ui/index.html       — HTML entry point, all styles inline (639 lines)
+  /apps/operator-shell/src/ui/session-view.js  — session poll, render loop, outbound send
+  /apps/operator-shell/src/ui/voice-capture.js — browser mic SM, audio POST to /voice/capture
+  /apps/operator-shell/src/ui/calendar-panel.js — calendar drawer, /calendar/status surface
+
+DEPLOY TARGET (Cloudflare Worker static assets — wrangler.jsonc assets.directory = ./public)
+  /worker-wb/public/index.html       — replaced from source; 639-line Stage 4 shell
+  /worker-wb/public/session-view.js  — copied from source
+  /worker-wb/public/voice-capture.js — copied from source
+  /worker-wb/public/calendar-panel.js — copied from source
+
+STALE FILES REMOVED
+  /worker-wb/public/css/style.css    — external stylesheet referenced by old 110-line UI; removed
+  /worker-wb/public/js/app.js        — inline logic referenced by old 110-line UI; removed
+
+ASSET RESOLUTION AT RUNTIME
+  GET /             → serves /worker-wb/public/index.html
+  GET /session-view.js  → serves /worker-wb/public/session-view.js   (relative import ./session-view.js)
+  GET /voice-capture.js → serves /worker-wb/public/voice-capture.js  (relative import ./voice-capture.js)
+  GET /calendar-panel.js → serves /worker-wb/public/calendar-panel.js (relative import ./calendar-panel.js)
+
+WIRING NOTE
+  index.html uses only relative ES module imports (./session-view.js etc.).
+  All styles are inline. No external CSS or CDN dependencies.
+  API calls target same-origin worker routes: /session/latest, /calendar/status,
+  /voice/capture, /telegram/webhook.
