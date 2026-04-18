@@ -1,0 +1,377 @@
+UI STAGE 4 DEMO CHECKLIST — EXEC-AI-STAGE4-001 | S5 | WORKER B
+===============================================================
+Generated: 2026-04-18
+Branch:    claude/calendar-action-paths-v68DY
+Artifact:  /worker-wb/src/routes/session-latest.ts (S5 tightening)
+Scope:     Stage 4 S5 update to the session/status surface so the
+           operator UI clearly shows pipeline states with timestamps
+           and compact result visibility.
+
+----------------------------------------------------------
+0. REFERENCES CONSULTED
+----------------------------------------------------------
+- /job_site/build-sheet-EXEC-AI-STAGE4-001.txt
+- /worker-wb/src/routes/session-latest.ts
+- /worker-wb/src/lib/session-store.ts
+- /worker-wb/src/routes/telegram-webhook.ts
+- /worker-wb/src/integrations/telegram/voice.ts
+- /apps/operator-shell/src/ui/session-view.js
+- /apps/operator-shell/src/ui/index.html
+
+FLAG: /job_site/reference_repo_matrix.txt is listed as a required
+      reference in the build sheet but is not present on disk. The
+      reference repos in build sheet §13 (linuz90/claude-telegram-bot,
+      permaevidence/ConciergeforTelegram, iOfficeAI/AionUi) informed
+      the state-trail and compact visibility patterns.
+
+----------------------------------------------------------
+1. STAGE 4 S5 CONTRACT (session/status surface)
+----------------------------------------------------------
+S5 adds a `pipeline` block to every GET /session/latest response.
+
+Shape:
+    pipeline: {
+      current_state: "idle" | "received" | "replied" | "failed",
+      current_label: string,   // compact one-line summary for UI
+      updated_at:   ISO string | null,
+      trail: [                 // newest first, same limit as items
+        {
+          item_id: string,
+          state:   "idle" | "received" | "replied" | "failed",
+          label:   string,     // compact per-event label
+          at:      ISO string,
+          kind:    "text" | "voice" | "other" | "failure",
+          source:  "telegram" | "ui",
+        },
+        ...
+      ]
+    }
+
+State derivation from session items:
+  direction=inbound,  any kind              → state "received"
+  direction=outbound, kind=text/other       → state "replied"
+  direction=outbound, kind=failure          → state "failed"
+  no items in store                         → state "idle"
+
+Labels:
+  received + text:    'Text: "[first 80 chars of text]"'
+  received + voice:   'Voice note received'   (or with transcript)
+  replied:            reply text (first 80 chars)
+  failed:             'Failed (failure_code): message (first 80 chars)'
+  idle:               'No events yet.'
+
+----------------------------------------------------------
+2. FULL PIPELINE STATE MODEL (all states, not just /session/latest)
+----------------------------------------------------------
+These are all named states across the full operator demo experience.
+The Session/status surface surfaces 4; the remaining 4 are UI-side or
+require pipeline recording (documented in §3 below).
+
+  received      ✓ surfaced via /session/latest pipeline block
+                  direction=inbound item in session store
+
+  recording     ✗ client-side only
+                  voice-capture.js badge state
+                  not in session store (browser is recording audio)
+
+  transcribing  ✗ intermediate pipeline step
+                  not in session store
+                  would require: recordPipelineStep('transcribing')
+                  called from voice.ts before Whisper/Deepgram call
+
+  processing    ✗ intermediate pipeline step
+                  not in session store
+                  would require: recordPipelineStep('processing')
+                  called from telegram-webhook.ts before
+                  generateAssistantReply()
+
+  action-called ✗ not yet in session store
+                  calendar invocation lives in calendar-status.ts
+                  lastResult; not crossed into session store
+                  would require: recordActionCall(event_id, action_type)
+                  called after ActionRouter.dispatch
+
+  replied       ✓ surfaced via /session/latest pipeline block
+                  direction=outbound, kind=text item in session store
+
+  failed        ✓ surfaced via /session/latest pipeline block
+                  direction=outbound, kind=failure in session store
+                  (already recorded by recordFailure in S2/S3/S4)
+
+  idle          ✓ surfaced via /session/latest pipeline block
+                  no items in store
+
+----------------------------------------------------------
+3. WHERE UI SHOWS EACH STATE
+----------------------------------------------------------
+  received:     /session/latest pipeline.current_state → UI renders
+                "received" badge on newest trail entry.
+                Also: makeEntry() in session-view.js adds entry to
+                transcript-log pane.
+
+  recording:    voice-capture.js badge (#voice-status-badge data-state=
+                "recording" with rec-pulse animation).
+                Visible during browser mic capture only.
+
+  transcribing: voice-capture.js badge (#voice-status-badge data-state=
+                "processing" — collapses transcribing+processing into
+                one "processing" browser-side state).
+                Not in /session/latest until pipeline recording added.
+
+  processing:   Same as above.
+
+  action-called: calendar-action-bar (#calendar-action-result) rendered
+                by session-view.js renderCalendar() from /calendar/status
+                last_result. Shows "✓ calendar.list_today ok · N events".
+                Not in /session/latest pipeline trail until pipeline
+                recording is added.
+
+  replied:      /session/latest pipeline.current_state → UI renders
+                "replied" badge on newest trail entry.
+                Also: makeEntry() in session-view.js adds entry to
+                response-log pane.
+
+  failed:       /session/latest pipeline.current_state → UI renders
+                "failed" badge on newest trail entry (kind=failure,
+                entry-outbound class with failure label).
+                Also renders in response-log pane.
+
+----------------------------------------------------------
+4. /SESSION/LATEST RESPONSE SHAPE (Stage 4 full)
+----------------------------------------------------------
+The enriched response every GET /session/latest call returns:
+
+  {
+    "ok":    true,
+    "session": {
+      "session_id":    "...",
+      "started_at":    "ISO",
+      "last_event_at": "ISO" | null
+    },
+    "items": [           // newest first, up to `limit` (default 25)
+      {
+        "id":         "in:telegram:NNN",
+        "direction":  "inbound",
+        "source":     "telegram",
+        "kind":       "text",
+        "chat_id":    123,
+        "message_id": 456,
+        "user_id":    789,
+        "username":   "alice",
+        "text":       "hello",
+        "at":         "ISO"
+      },
+      ...
+    ],
+    "counts": { "inbound": N, "outbound": N, "total": N },
+    "pipeline": {
+      "current_state": "replied",
+      "current_label": "Got it — \"hello\". Want me to note it...",
+      "updated_at":    "ISO",
+      "trail": [
+        { "item_id": "out:telegram:NNN", "state": "replied",
+          "label": "Got it — \"hello\"...", "at": "ISO",
+          "kind": "text", "source": "telegram" },
+        { "item_id": "in:telegram:NNN", "state": "received",
+          "label": "Text: \"hello\"", "at": "ISO",
+          "kind": "text", "source": "telegram" }
+      ]
+    },
+    "correlation_id": "..."
+  }
+
+----------------------------------------------------------
+5. PRE-FLIGHT (operator)
+----------------------------------------------------------
+Required before live demo:
+
+  [ ] Worker deployed from /worker-wb to *.workers.dev.
+      Deploy command: cd worker-wb && npm run deploy
+      Deploy root: /worker-wb (per cloudflare_prep_report.txt).
+
+  [ ] /session/latest is publicly accessible (not behind Cloudflare
+      Access). Listed in required_public_test_routes.
+      Check: curl -I https://ali-ai.<account>.workers.dev/session/latest
+      Expect: HTTP/1.1 200 (not 302 to Access login).
+
+  [ ] At least one Telegram message has been sent so the session store
+      is non-empty. Otherwise the pipeline block shows current_state=
+      "idle" and trail=[].
+
+  [ ] Operator UI open at the Worker root ("/").
+
+----------------------------------------------------------
+6. PROOF STEPS — SESSION/STATUS SURFACE
+----------------------------------------------------------
+
+Step 1 — idle baseline (empty store after fresh deploy)
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" \
+    | jq '{current_state: .pipeline.current_state,
+            trail_length: (.pipeline.trail | length),
+            updated_at: .pipeline.updated_at}'
+
+  Expect:
+    current_state = "idle"
+    trail_length  = 0
+    updated_at    = null
+
+Step 2 — received state after text inbound
+  Send a Telegram message to the connected bot (or use /ui/send).
+  Wait one poll cycle (5 s), then:
+
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" \
+    | jq '{current_state: .pipeline.current_state,
+            current_label: .pipeline.current_label,
+            updated_at: .pipeline.updated_at,
+            newest_trail: .pipeline.trail[0]}'
+
+  Expect (if reply has completed):
+    current_state = "replied"
+    current_label — first 80 chars of the assistant reply
+    newest_trail.state = "replied"
+    newest_trail.kind  = "text"
+
+  Expect (if read before reply arrives — unlikely with sync Worker):
+    current_state = "received"
+    current_label — 'Text: "…"'
+
+Step 3 — replied state confirmed in trail
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" \
+    | jq '.pipeline.trail | map({state, label, kind, at})'
+
+  Expect:
+    trail[0] — { state: "replied", kind: "text", label: "Got it — …", at: "ISO" }
+    trail[1] — { state: "received", kind: "text", label: 'Text: "…"', at: "ISO" }
+
+Step 4 — failed state from a send failure
+  Simulate a send failure by temporarily setting an invalid
+  TELEGRAM_BOT_TOKEN:
+    wrangler secret put TELEGRAM_BOT_TOKEN   (value: "bad-token")
+  Send a Telegram message, then:
+
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" \
+    | jq '{current_state: .pipeline.current_state,
+            current_label: .pipeline.current_label}'
+
+  Expect:
+    current_state = "failed"
+    current_label — "Failed (send_failed): <telegram error description>"
+
+  Restore the real token afterwards:
+    wrangler secret put TELEGRAM_BOT_TOKEN
+
+Step 5 — voice inbound state (if voice demo is in scope)
+  Send a voice note via Telegram.
+  curl -s "https://ali-ai.<account>.workers.dev/session/latest" \
+    | jq '.pipeline.trail | map(select(.kind == "voice"))'
+
+  Expect after voice pipeline completes:
+    trail entry with kind="voice", state="received" (inbound)
+    subsequent trail entry with kind="text", state="replied" (outbound)
+
+Step 6 — UI displays state trail in event panes
+  In the operator shell (browser), confirm:
+    [ ] Transcript pane (inbound) shows text/voice entries with kind
+        badge on voice items.
+    [ ] Response pane (outbound) shows assistant replies (state=replied)
+        or failure entries (state=failed, entry-outbound class).
+    [ ] #last-event-marker badge shows "last event Xs ago" from the
+        session.last_event_at field.
+    [ ] #status-state shows the UIRenderState.kind ("live" / "idle").
+
+Step 7 — capture evidence
+  [ ] curl output from Step 1 (idle baseline)
+  [ ] curl output from Step 3 (replied trail)
+  [ ] curl output from Step 4 (failed state) [if token test done]
+  [ ] UI screenshot showing event trail in both panes
+
+----------------------------------------------------------
+7. COMPACT VISIBILITY CONTRACT (what the UI renders)
+----------------------------------------------------------
+For each item in pipeline.trail, the UI should render:
+
+  state=received:
+    badge  ← "received"  (or "voice received" for kind=voice)
+    label  ← item.label (first 80 chars of text, or "Voice note received")
+    time   ← formatTime(item.at)
+
+  state=replied:
+    badge  ← "replied"
+    label  ← item.label (first 80 chars of reply text)
+    time   ← formatTime(item.at)
+
+  state=failed:
+    badge  ← "failed"
+    label  ← item.label ("Failed (error_code): message")
+    time   ← formatTime(item.at)
+
+  state=idle (no trail):
+    pane   ← "No events yet."
+
+This maps directly to the existing makeEntry() rendering in
+session-view.js. The pipeline.trail is a compact pre-formatted
+version of the same data already in items[], allowing the UI to
+render a status-strip separately from the full event pane if needed.
+
+----------------------------------------------------------
+8. WHAT REMAINS FOR FULL STATE COVERAGE
+----------------------------------------------------------
+To surface recording/transcribing/processing/action-called in
+/session/latest, the following pipeline recording additions are
+needed (out of Stage 4 scope, noted here for Stage 5/6):
+
+  a. voice.ts: call recordPipelineStep('transcribing', event_id)
+     before the transcription provider call, and
+     recordPipelineStep('processing', event_id) before
+     generateAssistantReply(). Requires a new SessionItem
+     kind='pipeline_step' or a new 'stage' field on SessionItem.
+
+  b. telegram-webhook.ts: call
+     recordPipelineStep('processing', event_id) before
+     generateAssistantReply() on the text path.
+
+  c. calendar-status.ts / action-router.ts: call
+     recordPipelineStep('action-called', event_id, action_type)
+     after ActionRouter.dispatch returns ok=true, and cross the
+     ActionResult into the session store so it appears alongside
+     the exchange that triggered it.
+
+  recording state is browser-side (voice-capture.js) and cannot be
+  surfaced via /session/latest regardless of pipeline recording.
+
+----------------------------------------------------------
+9. ACCEPTANCE GATES (Stage 4 S5 checkpoint)
+----------------------------------------------------------
+PASS conditions (all must hold):
+  [ ] GET /session/latest response always contains a `pipeline` block.
+  [ ] pipeline.current_state is one of:
+        idle | received | replied | failed
+  [ ] pipeline.current_label is a non-empty string on every state.
+  [ ] pipeline.trail entries carry item_id, state, label, at, kind,
+      source — all non-null.
+  [ ] Newest trail entry matches the most recent session item.
+  [ ] pipeline.updated_at matches the newest item's at timestamp.
+  [ ] GET /session/latest returns HTTP 200 on idle (empty store).
+  [ ] GET /session/latest returns HTTP 200 whether store is empty
+      or has items.
+  [ ] HEAD returns 200 with no body.
+  [ ] POST/PUT/PATCH/DELETE return 405.
+  [ ] Repo mirrored, committed, pushed.
+
+PATCH conditions (any one fails):
+  [ ] pipeline block absent from /session/latest response.
+  [ ] current_state is not one of the four values.
+  [ ] current_label is empty, null, or a raw stack trace.
+  [ ] trail[0] does not match the most recent item.
+  [ ] Route throws or returns non-200.
+
+----------------------------------------------------------
+10. ARTIFACT SELF-CHECK
+----------------------------------------------------------
+expected_artifact_1: /worker-wb/src/routes/session-latest.ts
+                     — present (pipeline block added)
+expected_artifact_2: /job_site/ui_stage4_demo_checklist.txt
+                     — present (this file)
+repo_mirror_required: yes — written to /home/user/ALI-ai working tree
+commit_required:      yes — claude/calendar-action-paths-v68DY
+push_required:        yes — origin claude/calendar-action-paths-v68DY
