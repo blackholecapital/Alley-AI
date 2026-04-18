@@ -76,3 +76,52 @@ export interface VoiceCaptureResultErr {
   error: { code: string; message: string };
 }
 export type VoiceCaptureResult = VoiceCaptureResultOk | VoiceCaptureResultErr;
+
+// S4: Calendar settings panel contract.
+// Implemented in /apps/operator-shell/src/ui/calendar-panel.js.
+// Also documented in /job_site/calendar_ui_contract.txt.
+export type CalendarUIState =
+  | 'unknown'        // not fetched yet
+  | 'ready'          // provider.ready === true
+  | 'not_ready'      // provider named but ready === false (not unconfigured / unsupported)
+  | 'unconfigured'   // CALENDAR_PROVIDER unset / "none" / ""
+  | 'unsupported'    // CALENDAR_PROVIDER set to an unknown value
+  | 'error';         // /calendar/status unreachable or malformed
+
+export interface CalendarProviderStatusView {
+  provider: string;
+  ready: boolean;
+  reason?: string;
+  detail?: string;
+}
+
+export interface CalendarActionRegistrationView {
+  action_type: 'calendar.list_today';
+  registered: boolean;
+}
+
+export interface CalendarInvocationView {
+  ok: boolean;
+  action_type: string;
+  reply_text: string;
+  handled_at: string;
+  error?: { code: string; message: string; detail?: string };
+  payload?: { event_count?: number; provider?: CalendarProviderStatusView };
+}
+
+export interface CalendarStatusResponseView {
+  ok: true;
+  provider: CalendarProviderStatusView;
+  action: CalendarActionRegistrationView;
+  config: { timezone_offset_minutes: number };
+  invocation: CalendarInvocationView | null;
+  last_result: CalendarInvocationView | null;
+}
+
+export interface CalendarPanelModel {
+  ui_state: CalendarUIState;
+  provider: CalendarProviderStatusView | null;
+  guidance_text: string;
+  last_invocation: CalendarInvocationView | null;
+  can_run: boolean;
+}
