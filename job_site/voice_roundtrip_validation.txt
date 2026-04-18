@@ -1,11 +1,4 @@
-VOICE ROUNDTRIP VALIDATION — EXEC-AI-STAGE4-001 | S3 | WORKER B
-================================================================
-Generated:         2026-04-18
-Branch:            claude/verify-ui-assistant-responses-PLrmX
-Expected status:   PASS
-Reported status:   PATCH  (validation criterion "pipeline not stuck at
-                          'received'" fails for the browser /voice/capture
-                          path — see §4.)
+VOICE ROUNDTRIP VALIDATION (RE-VALIDATION PASS) — EXEC-AI-STAGE4-001 | S3 | WORKER B
 Repo mirror:       no
 Commit / push:     no
 Companion tests:   /worker-wb/test/browser-voice-roundtrip.test.ts
@@ -14,279 +7,287 @@ Companion docs:    /job_site/voice_demo_checklist.txt
                    /job_site/voice_capture_contract.txt
                    /job_site/voice_failure_modes_pipeline.txt
 
-Scope: Re-validate the voice round trip end-to-end for the browser
-       /voice/capture path:
-         /voice/capture → transcription pipeline → session store
-                       → /session/latest pipeline view
-       Confirm one successful or clean failure case, and verify that the
-       /session/latest pipeline.current_state is NOT stuck at "received"
-       after a captured voice turn.
+Scope: Re-validate the browser /voice/capture round trip after Worker A's
+       expected loop-closure patch. Confirm /session/latest pipeline state
+       advances to 'replied' (success) or 'failed' (clean failure) and is
+       NOT stuck at 'received'.
 
 ----------------------------------------------------------------------
-0. REFERENCES CONSULTED
+0. PRIOR VALIDATION + RE-VALIDATION CONTEXT
 ----------------------------------------------------------------------
-- /job_site/build-sheet-EXEC-AI-STAGE4-001.txt          (active build sheet)
+0.1  Prior pass (commit 8842baf on this branch, 2026-04-18):
+     - Reported status: PATCH.
+     - Findings (P1, P2): handleVoiceCapture only persists an inbound item;
+       /session/latest pipeline.current_state is stuck at 'received' after
+       every accepted /voice/capture call (success and clean-failure
+       branches alike).
+     - Recommended fix scope: voice.ts:394-511; add recordUiOutbound on
+       success and a UI-tagged failure record on the failure paths.
+
+0.2  Sibling patch landed since then (commit b512e17, merged on
+     origin/main):
+     - "S4 S2 Worker A: unify UI reply generator with Telegram pipeline".
+     - Patches /worker-wb/src/routes/ui-send.ts to call shared
+       generateAssistantReply (no longer the "received: <text>" echo).
+     - Adds optional `source` to recordFailure in
+       /worker-wb/src/lib/session-store.ts so UI-channel failures can
+       be tagged with source='ui'.
+     - Does NOT touch voice.ts. The text path is closed-loop now; the
+       browser voice path is not.
+
+0.3  Re-validation trigger: dispatch
+     "[EXEC-AI-STAGE4-001 | WORKER B | S3 | RESULT]" (2026-04-18,
+     this turn) requests re-validation "after patch" with the same
+     artifact path. This file is overwritten in place with the
+     re-validation result.
+
+----------------------------------------------------------------------
+1. REFERENCES CONSULTED (this pass)
+----------------------------------------------------------------------
 - /job_site/voice_demo_checklist.txt                    (S3 + S4 demo steps)
 - /job_site/voice_capture_contract.txt                  (endpoint contract)
 - /job_site/voice_failure_modes_pipeline.txt            (backend layer modes)
-- /worker-wb/src/integrations/telegram/voice.ts         (handleVoiceCapture
-                                                          + handleTelegramVoiceNote)
+- /worker-wb/src/integrations/telegram/voice.ts         (re-read this pass)
 - /worker-wb/src/routes/session-latest.ts               (buildPipelineView)
-- /worker-wb/src/lib/session-store.ts                   (recordUiInbound,
-                                                          recordUiOutbound,
-                                                          recordFailure)
-- /worker-wb/src/index.ts                               (route dispatch)
-- /apps/operator-shell/src/ui/voice-capture.js          (browser state machine)
+- /worker-wb/src/lib/session-store.ts                   (recordFailure now
+                                                          accepts source —
+                                                          new this pass)
+- /worker-wb/src/routes/ui-send.ts                      (text path now uses
+                                                          shared assistant —
+                                                          new this pass)
+
+Branch / commit context (collected this pass):
+  - HEAD on claude/verify-ui-assistant-responses-PLrmX includes
+    merge 2419b68 of origin/main (708fce6).
+  - git log --all --since "2 days ago" -- worker-wb/src/integrations/
+    telegram/voice.ts shows:
+      b729a33  feat(voice): add POST /voice/capture handler ...   (prior)
+      cda4753  S3 Worker A: complete voice-note flow ...           (prior)
+      7699ef6  S4 Worker A: Telegram voice intake + transcription  (prior)
+    No newer voice.ts commit exists on any branch.
 
 ----------------------------------------------------------------------
-1. UNDER-TEST PATH (browser /voice/capture)
+2. WHAT THE EXPECTED PATCH WAS (per §6 of prior validation)
 ----------------------------------------------------------------------
-The browser operator UI captures audio in voice-capture.js, then POSTs
-multipart/form-data to /voice/capture (worker-wb/src/integrations/
-telegram/voice.ts:394 handleVoiceCapture). The handler:
+Inside /worker-wb/src/integrations/telegram/voice.ts handleVoiceCapture
+(lines 394-511), close the loop after the inbound is persisted:
 
-  1. method/format/MIME/size validation (lines 399-459)
-  2. recordUiInbound({ text: <transcript or "[voice: <mime>, <size> bytes]" })
-     ← session-store.ts:165, source='ui', kind='text', direction='inbound'
-  3. returns 200 { ok: true, session_id }
+  Success path (transcriptText is non-null):
+    const inbound = recordUiInbound({ text: transcriptText });
+    const replyText = generateAssistantReply(transcriptText);
+    recordUiOutbound({ event_id: inbound.id, text: replyText });
 
-The UI then polls /session/latest (session-latest.ts handleSessionLatest)
-which derives a pipeline view from the newest item:
+  Clean-failure path (provider not ready or result.ok === false):
+    const inbound = recordUiInbound({ text: "[voice: <mime>, <bytes>]" });
+    recordFailure({
+      event_id:        inbound.id,
+      chat_id:         0,                     // UI synthetic chat_id
+      failure_code:    'voice_transcription_unavailable'
+                        | 'voice_transcription_failed',
+      failure_message: <reason or 'no transcription provider configured'>,
+      source:          'ui',                  // enabled by b512e17
+    });
 
-  itemState(item):
-    direction='inbound'                       → 'received'
-    direction='outbound', kind='failure'      → 'failed'
-    direction='outbound', kind!='failure'     → 'replied'
-    no items                                  → 'idle'
-
-So pipeline.current_state is determined entirely by the most recent
-session-store item. After a successful /voice/capture call, the most
-recent item is the recordUiInbound entry (direction='inbound'),
-producing pipeline.current_state = 'received'.
+After this patch:
+  - Success → pipeline.current_state advances to 'replied' (because the
+    newest item is direction='outbound', kind='text').
+  - Clean failure → pipeline.current_state advances to 'failed' (because
+    the newest item is direction='outbound', kind='failure').
 
 ----------------------------------------------------------------------
-2. CASE A — SUCCESSFUL CAPTURE WITH TRANSCRIPTION
+3. RE-VALIDATION FINDING — PATCH HAS NOT LANDED
+----------------------------------------------------------------------
+Re-read of /worker-wb/src/integrations/telegram/voice.ts at HEAD on
+this branch (post-merge of origin/main):
+
+  Line 26  imports recordInbound, recordOutbound, recordUiInbound, getLatest
+            — recordUiOutbound is NOT imported.
+            — recordFailure is NOT imported.
+  Line 460-505 handleVoiceCapture body:
+            - validates request, computes sourceId, runs transcription
+              (or stub).
+            - recordUiInbound({ text: transcriptText
+                                  ?? `[voice: ${mimeType}, ${size} bytes]` })
+              ← LINE 500-502: only write to the session store.
+            - returns 200 { ok: true, session_id }.
+
+No recordUiOutbound, no recordFailure, no generateAssistantReply call
+inside handleVoiceCapture. The endpoint behaviour is byte-for-byte
+identical to the prior validation pass (commit 8842baf).
+
+Conclusion: the loop-closure patch the dispatch refers to has NOT been
+applied. The handler still leaves /session/latest pipeline.current_state
+stuck at 'received' after every accepted /voice/capture call.
+
+The text path (/ui/send) WAS patched (commit b512e17) and now closes
+its loop with shared generateAssistantReply + recordUiOutbound. The
+voice path (/voice/capture) was not included in that patch.
+
+----------------------------------------------------------------------
+4. SUCCESS CASE (as observed at HEAD this pass)
 ----------------------------------------------------------------------
 Trigger:
-  Operator opens the UI on HTTPS, taps Talk, speaks one short sentence
-  ("remind me to call alice tomorrow"), taps Stop & Send.
-  voice-capture.js stops MediaRecorder, posts the audio blob to
+  Operator opens the UI on HTTPS, taps Talk, says one short sentence,
+  taps Stop & Send. voice-capture.js posts the audio blob to
   /voice/capture as multipart audio (audio/webm;codecs=opus).
   DEEPGRAM_API_KEY is set; provider.ready === true.
 
-Worker pipeline (handleVoiceCapture):
-  - voice.capture.received logged (source_id, mime_type, size).
-  - provider.transcribe({ audio, mime_type, source_id }) → result.ok=true.
-  - voice.capture.transcribed logged (provider, text_length).
-  - recordUiInbound({ text: "<transcript text>" }).
-  - voice.capture.ok logged (source_id, session_id).
-  - HTTP 200 { ok: true, session_id: "<uuid>" }.
+Worker pipeline (handleVoiceCapture, voice.ts:394-511):
+  1. validation passes.
+  2. provider.transcribe → result.ok === true, transcriptText set.
+  3. voice.capture.transcribed logged.
+  4. recordUiInbound({ text: transcriptText }).         ← only write
+  5. voice.capture.ok logged.
+  6. HTTP 200 { ok: true, session_id }.
 
-UI observation (within one POLL_MS = 5 s):
+/session/latest after the capture (relevant slice):
+  items[0]:
+    { "id": "in:ui:<uuid>",
+      "direction": "inbound",
+      "source":    "ui",
+      "kind":      "text",
+      "text":      "<transcript text>",
+      "at":        "...Z" }
+  pipeline.current_state = "received"             ← STILL STUCK
+  pipeline.current_label = "Text: \"<transcript text>\""
 
-  /session/latest body (relevant slice):
-    {
-      "ok": true,
-      "session": { "session_id": "<uuid>", "last_event_at": "...Z" },
-      "counts": { "inbound": N+1, "outbound": M, "total": N+M+1 },
-      "items": [
-        { "id": "in:ui:<uuid>",
-          "direction": "inbound",
-          "source": "ui",
-          "kind": "text",
-          "text": "remind me to call alice tomorrow",
-          "at": "...Z" },
-        ...prior items...
-      ],
-      "pipeline": {
-        "current_state": "received",     ← STUCK HERE
-        "current_label": "Text: \"remind me to call alice tomorrow\"",
-        "updated_at":    "...Z",
-        "trail": [ { ..., "state": "received" }, ... ]
-      }
-    }
+UI rendering: one new entry in #transcript-log (source 'ui'); no entry
+in #response-log; #status-state shows "received".
 
-  session-view.js renders one new entry in #transcript-log
-  ("remind me to call alice tomorrow") with source 'ui'.
-  #response-log gains NO entry — counts.outbound is unchanged.
-  #status-state shows "received".
-
-Loop closure: NO. The handler completes successfully and the audio is
-transcribed, but no outbound (or failure) item is appended, so the
-pipeline state remains at 'received' until a subsequent event from
-another channel (e.g. an inbound Telegram message or a /ui/send POST)
-overwrites the newest item.
-
-Verdict for Case A: round-trip is partial. /voice/capture returns 200
-and the inbound side persists with the transcript, but the loop is not
-closed.
+Verdict: the success criterion ("pipeline shows 'replied' or 'failed'")
+is NOT met for this pass.
 
 ----------------------------------------------------------------------
-3. CASE B — CLEAN FAILURE (TRANSCRIPTION UNAVAILABLE)
+5. CLEAN FAILURE CASE (as observed at HEAD this pass)
 ----------------------------------------------------------------------
 Trigger:
-  Same browser action as Case A, but DEEPGRAM_API_KEY is unset (or
+  Same browser action as §4, but DEEPGRAM_API_KEY unset (or
   TRANSCRIPTION_PROVIDER=noop). provider.ready === false.
 
-Worker pipeline (handleVoiceCapture):
-  - validation passes.
-  - provider.ready is false → branch at voice.ts:493-498:
-      logger.info('voice.capture.transcription_stub', { provider }).
-  - recordUiInbound({ text: "[voice: audio/webm, 4096 bytes]" }).
-  - voice.capture.ok logged.
-  - HTTP 200 { ok: true, session_id }.
+Worker pipeline (handleVoiceCapture, voice.ts:493-498):
+  1. validation passes.
+  2. provider.ready false → voice.capture.transcription_stub logged.
+  3. recordUiInbound({ text: `[voice: audio/webm, 4096 bytes]` }).
+  4. voice.capture.ok logged.
+  5. HTTP 200 { ok: true, session_id }.
 
-  This is the documented "clean failure" path per
-  voice_failure_modes_pipeline.txt §3 (transcription_failure → POST
-  /voice/capture, lines 135-139): logger.warn / logger.info, then
-  recordUiInbound with the placeholder text, return 200, transcript
-  absent.
-
-UI observation:
-
-  /session/latest items[0]:
+/session/latest after the capture:
+  items[0]:
     { "direction": "inbound",
       "source":    "ui",
       "kind":      "text",
       "text":      "[voice: audio/webm, 4096 bytes]",
       "at":        "...Z" }
+  pipeline.current_state = "received"             ← STILL STUCK
 
-  pipeline.current_state = "received"          ← STUCK HERE
-  pipeline.current_label = "Text: \"[voice: audio/webm, 4096 bytes]\""
+No failure item recorded; counts.outbound unchanged. The clean-failure
+path is indistinguishable from the success path at the pipeline-state
+level — only the placeholder text differs from the transcript text.
 
-  No failure item is recorded. counts.outbound is unchanged.
-
-Loop closure: NO. The clean-failure path also leaves the pipeline state
-at 'received'. There is no readable indication in /session/latest that
-transcription was skipped versus succeeded — only the placeholder
-"[voice: <mime>, <size> bytes]" text differentiates the two from a
-successful capture-with-transcript.
-
-Verdict for Case B: clean failure, but indistinguishable from Case A
-at the pipeline-state level. Both leave pipeline.current_state =
-'received' after the capture.
+Verdict: the failure criterion ("pipeline shows 'failed'") is NOT met
+for this pass.
 
 ----------------------------------------------------------------------
-4. PIPELINE-STATE STUCK-AT-"received" — ROOT CAUSE
+6. RE-VALIDATION RESULT
 ----------------------------------------------------------------------
-Source: /worker-wb/src/integrations/telegram/voice.ts handleVoiceCapture
-        (lines 394-511)
+Criterion: "/session/latest shows 'replied' or 'failed' (not stuck at
+            'received')".
 
-handleVoiceCapture writes exactly one session-store item per accepted
-request — recordUiInbound (line 500). It never calls:
-  - recordUiOutbound (declared at session-store.ts:190 but only consumed
-    by /worker-wb/src/routes/ui-send.ts:72 today — text path only)
-  - recordFailure  (consumed only by telegram-webhook.ts text/voice
-    paths today)
-  - the assistant pipeline (generateAssistantReply, used by
-    telegram-webhook.ts and injected into handleTelegramVoiceNote)
+  Success branch:        pipeline.current_state = 'received'  ❌
+  Clean-failure branch:  pipeline.current_state = 'received'  ❌
 
-Result: every /voice/capture call ends with the newest session-store
-item being direction='inbound', so buildPipelineView returns
-current_state='received' and current_label set to the inbound text.
+Reported status: PATCH (deviates from expected_status: PASS).
 
-Comparison — the Telegram voice path (handleTelegramVoiceNote) closes
-the loop in BOTH success and clean-failure branches:
-
-  Branch                     recordOutbound called?  Pipeline ends at
-  -------------------------  ----------------------  ----------------
-  fetch_failed               yes (FETCH_FALLBACK)    'replied'
-  transcription_env_invalid  yes (TRANSCRIPTION_     'replied'
-                                  UNAVAILABLE)
-  transcription_failed       yes (TRANSCRIPTION_     'replied'
-                                  FAILED)
-  replied (happy path)       yes (assistantPipeline) 'replied'
-
-So the Stage 3 voice contract (R1: "voice in → ONE outbound reply",
-R3: "failure paths record exactly one failure event") is met by the
-Telegram path but NOT by the browser /voice/capture path. The browser
-path leaves an open loop visible in /session/latest as a perpetual
-'received' state.
+Re-validation cannot succeed until Worker A applies the §2 patch to
+voice.ts. The §2 sketch is now also slightly cleaner than in the prior
+validation report because session-store.ts already accepts an optional
+source (new with commit b512e17), so the failure-path recordFailure
+call no longer needs a new helper — it can use recordFailure({...,
+source: 'ui'}) directly.
 
 ----------------------------------------------------------------------
-5. VALIDATION RESULT
+7. UNCHANGED RECOMMENDED FIX (for next Worker A pass)
 ----------------------------------------------------------------------
-Criterion 1 — "Confirm one successful or clean failure case":
-  Met. Case A (transcription succeeded) and Case B (transcription
-  unavailable, clean fallback) were both confirmed; either qualifies.
-  Test coverage:
-    /worker-wb/test/browser-voice-roundtrip.test.ts
-      24 cases, including R1 (valid audio → 200 + one inbound item),
-      R2 (item text records mime + size), R5/R6/R7/R8/R9 (rejection
-      paths), INV (rejections do not pollute the store), INV (handler
-      never throws). All passing per voice_demo_checklist S4.1.
+Patch /worker-wb/src/integrations/telegram/voice.ts:
 
-Criterion 2 — "Ensure pipeline state is not stuck at 'received'":
-  NOT MET. After every accepted /voice/capture call (success OR clean
-  failure), pipeline.current_state in /session/latest is 'received'
-  and stays there until an unrelated event from another channel
-  overwrites the newest session-store item.
+  Imports (line 26):
+    -import { recordInbound, recordOutbound, recordUiInbound, getLatest }
+    -  from '../../lib/session-store';
+    +import { recordInbound, recordOutbound, recordUiInbound,
+    +         recordUiOutbound, recordFailure, getLatest }
+    +  from '../../lib/session-store';
+    +import { generateAssistantReply } from '../../routes/telegram-webhook';
+    (or, cleaner, lift generateAssistantReply into a shared
+     /worker-wb/src/lib/assistant.ts and import from there to avoid the
+     route → integration import direction.)
 
-Overall: PATCH. The endpoint is operationally correct (validates,
-transcribes when configured, persists inbound, returns 200 with
-session_id), but the pipeline view never advances past 'received' for
-the browser voice channel.
+  handleVoiceCapture body (around lines 500-502):
+    -  recordUiInbound({
+    -    text: transcriptText ?? `[voice: ${mimeType}, ${audioFile.size} bytes]`,
+    -  });
+    +  const inboundItem = recordUiInbound({
+    +    text: transcriptText ?? `[voice: ${mimeType}, ${audioFile.size} bytes]`,
+    +  });
+    +
+    +  if (transcriptText !== null) {
+    +    const replyText = generateAssistantReply(transcriptText);
+    +    recordUiOutbound({ event_id: inboundItem.id, text: replyText });
+    +    logger.info('voice.capture.replied', {
+    +      source_id: sourceId,
+    +      reply_length: replyText.length,
+    +    });
+    +  } else {
+    +    const failureCode = provider.ready
+    +      ? 'voice_transcription_failed'
+    +      : 'voice_transcription_unavailable';
+    +    recordFailure({
+    +      event_id:        inboundItem.id,
+    +      chat_id:         0,
+    +      failure_code:    failureCode,
+    +      failure_message: provider.ready
+    +        ? 'transcription provider returned no text'
+    +        : 'no transcription provider configured',
+    +      source:          'ui',
+    +    });
+    +    logger.warn('voice.capture.failed_recorded', {
+    +      source_id: sourceId,
+    +      failure_code: failureCode,
+    +    });
+    +  }
 
-----------------------------------------------------------------------
-6. RECOMMENDED FIX (for next pass — out of scope for this validation)
-----------------------------------------------------------------------
-Add a loop-closure step inside handleVoiceCapture, mirroring the
-Telegram voice path:
+  Test addition (browser-voice-roundtrip.test.ts):
+    - "successful capture → /session/latest pipeline.current_state = 'replied'"
+    - "clean failure (provider not ready) → pipeline.current_state = 'failed'"
+    - "clean failure (provider returns ok:false) → pipeline.current_state = 'failed'"
 
-  6.1 Successful transcription:
-      const replyText = generateAssistantReply(transcriptText);
-      recordUiOutbound({ event_id: <inbound id>, text: replyText });
+After this patch, re-running this validation should report PASS:
 
-  6.2 Clean failure (provider not ready or transcription failed):
-      recordFailure({
-        event_id:        <inbound id>,
-        chat_id:         0,                 // UI synthetic chat id
-        failure_code:    'voice_transcription_unavailable'
-                          | 'voice_transcription_failed',
-        failure_message: <reason>
-      });
-      // Optional: recordUiOutbound with TRANSCRIPTION_UNAVAILABLE_REPLY
-      // if a user-visible reply is desired in the UI response pane.
-
-After 6.1: pipeline.current_state advances to 'replied'.
-After 6.2: pipeline.current_state advances to 'failed' with a readable
-           failure_code in current_label.
-
-Either choice removes the stuck-at-'received' condition. The cleanest
-parity move is 6.1 for the success path (so the UI Response pane shows
-an assistant-voice acknowledgement of the spoken request) and the
-recordFailure variant of 6.2 for the failure path (so the operator can
-distinguish "voice received but not understood" from "voice received
-and replied to").
-
-A non-trivial refactor of session-store would extend recordFailure to
-accept source='ui' (today it hard-codes source='telegram' at
-session-store.ts:140); the recommended minimal change is to add a
-recordUiFailure helper symmetric with recordUiInbound/recordUiOutbound.
-
-This fix belongs to a Worker A patch on
-/worker-wb/src/integrations/telegram/voice.ts (S3 scope). It is OUT OF
-SCOPE for this Worker B validation pass per the dispatch flags
-(repo_mirror_required: no, commit_required: no, push_required: no).
+  Success    → pipeline.current_state = 'replied',
+                 current_label = the assistant reply text (truncated).
+  Clean fail → pipeline.current_state = 'failed',
+                 current_label = "Failed (voice_transcription_*): ...".
 
 ----------------------------------------------------------------------
-7. ARTIFACT SELF-CHECK
+8. ARTIFACT SELF-CHECK
 ----------------------------------------------------------------------
-expected_artifact_1:  /job_site/voice_roundtrip_validation.txt — present (this file)
-required_reference_1: /job_site/build-sheet-EXEC-AI-STAGE4-001.txt — read
-required_reference_2: /job_site/voice_demo_checklist.txt — read
+expected_artifact_1:  /job_site/voice_roundtrip_validation.txt — present
+                       (this file overwrites the 8842baf version with the
+                        re-validation pass record)
+required_reference_1: /job_site/voice_demo_checklist.txt — read
 worker_result_tag:    [EXEC-AI-STAGE4-001 | WORKER B | S3 | RESULT]
 status:               PATCH
-issues:               P1 — handleVoiceCapture writes only an inbound item;
-                            /session/latest pipeline.current_state is stuck
-                            at 'received' for the browser voice channel.
-                            Fix scope: voice.ts:394-511. Recommended changes
-                            in §6.
-                      P2 — Successful and clean-failure /voice/capture calls
-                            are indistinguishable in pipeline.current_state
-                            (both 'received'); only the inbound item text
-                            differs ("[voice: <mime>, <size> bytes]" vs.
-                            transcript). Resolved by P1's fix.
+issues:               P1 — voice.ts handleVoiceCapture loop-closure patch
+                            has NOT landed on this branch or origin/main.
+                            /session/latest pipeline.current_state still
+                            stuck at 'received' for the browser voice
+                            channel (success and clean-failure alike).
+                      P2 — Recommended patch sketch (§7) updated to use
+                            the now-available recordFailure({source:'ui'})
+                            from commit b512e17 — no new session-store
+                            helper needed.
+                      P3 — Sibling text-path patch (b512e17) shipped and
+                            closes the /ui/send loop; the analogous voice
+                            change (this report) remains outstanding.
 repo_mirror_required: no
 commit_required:      no
 push_required:        no
