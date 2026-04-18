@@ -1,9 +1,10 @@
 BROWSER CHAT DEMO CHECKLIST
-job_id: EXEC-AI-STAGE4-UIFIX-002
+job_id: EXEC-AI-STAGE4-UIFIX-002A
 stage: S3
 artifact: /job_site/browser_chat_demo_checklist.txt
 route_under_test: POST /ui/send
 contract_ref: /job_site/browser_chat_route_contract.txt
+build_sheet_ref: /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
 
 PURPOSE
 -------
@@ -69,10 +70,33 @@ SECTION 6 — REJECTION HANDLING (OPERATOR EDGE CASES)
 [ ] 6.3  After the error, the input field is still focusable and accepts new input
 [ ] 6.4  Sending a valid message after the error works normally (assistant replies)
 
+SECTION 7 — FAILURE ISOLATION (TRANSCRIPTION FAILURE MUST NOT BLOCK CHAT)
+--------------------------------------------------------------------------
+Context: The deployed UI shows transcription failures in the response pane
+(e.g. "[transcription_failed] provider=deepgram reason=deepgram 401
+INVALID_AUTH"). This section proves that such failures are isolated to the
+voice path and do not prevent text chat from working.
+
+[ ] 7.1  Observe or provoke a transcription failure (e.g., Talk button with
+         invalid Deepgram credentials). The failure event appears in the
+         assistant response pane as a [transcription_failed] message.
+[ ] 7.2  WITHOUT refreshing, type a text message into the chat input and
+         press Send.
+[ ] 7.3  The assistant reply appears normally — the transcription failure
+         did NOT prevent the chat reply.
+[ ] 7.4  The reply text is NOT "received: …" and is NOT empty — it is a
+         real assistant-voice sentence.
+[ ] 7.5  The session trail shows both items: the failure event from step 7.1
+         AND the new inbound+outbound exchange from step 7.2.
+[ ] 7.6  Repeat: send a second text message. The assistant replies again.
+         The failure event remains in the trail but does not reappear or
+         duplicate.
+
 PASS CRITERIA
 -------------
 All items in Sections 1–5 are checked.
 Section 6 items are checked or explicitly noted as not applicable.
+All items in Section 7 are checked (failure isolation verified).
 
 OPERATOR SIGN-OFF
 -----------------
