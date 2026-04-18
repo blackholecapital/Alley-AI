@@ -1,0 +1,82 @@
+BROWSER CHAT DEMO CHECKLIST
+job_id: EXEC-AI-STAGE4-UIFIX-002
+stage: S3
+artifact: /job_site/browser_chat_demo_checklist.txt
+route_under_test: POST /ui/send
+contract_ref: /job_site/browser_chat_route_contract.txt
+
+PURPOSE
+-------
+Operator checklist proving that browser text input produces a non-placeholder
+assistant reply and that the visible exchange (inbound + outbound) is persisted
+in the session trail.  Step through each item in order with the live deployed UI.
+
+PRE-CONDITIONS
+--------------
+[ ] Worker is deployed and reachable (cf. /job_site/cloudflare_prep_report.txt)
+[ ] Browser is open to the operator shell (/)
+[ ] Chat input field is visible and empty
+[ ] No prior session items are visible (fresh load or isolate restart)
+
+SECTION 1 — HAPPY PATH: TEXT INPUT → ASSISTANT REPLY
+------------------------------------------------------
+[ ] 1.1  Type a greeting ("hi" or "hello") into the chat input field
+[ ] 1.2  Press Send (button click or Enter key)
+[ ] 1.3  The UI shows the submitted text in the exchange as the user turn
+[ ] 1.4  Within one request round-trip the UI displays an assistant reply
+[ ] 1.5  The reply text is NOT "received: hi" or any verbatim echo of the input
+[ ] 1.6  The reply text is an assistant-voice sentence (e.g., "Hi — assistant
+          here. What would you like me to work on?")
+[ ] 1.7  The chat input field is cleared after the reply is rendered
+
+SECTION 2 — QUESTION INPUT → NON-PLACEHOLDER REPLY
+----------------------------------------------------
+[ ] 2.1  Type a question ("what's on today?") into the input field
+[ ] 2.2  Press Send
+[ ] 2.3  The assistant reply is a sentence that acknowledges the question
+[ ] 2.4  The reply does NOT start with "received:" or contain only the input text
+
+SECTION 3 — STATEMENT INPUT → NON-PLACEHOLDER REPLY
+----------------------------------------------------
+[ ] 3.1  Type a statement ("please note I have a 3pm call") into the input field
+[ ] 3.2  Press Send
+[ ] 3.3  The assistant reply offers to note, schedule, or acknowledge the item
+[ ] 3.4  The reply is different from the submitted text
+
+SECTION 4 — SESSION PERSISTENCE (VISIBLE EXCHANGE)
+---------------------------------------------------
+[ ] 4.1  After step 1 completes, the exchange shows at least two items in the
+          visible trail: one user turn and one assistant turn
+[ ] 4.2  After step 2, the trail shows four items (two user + two assistant)
+[ ] 4.3  Refreshing the page while the session is live does NOT lose the visible
+          exchange (the trail is rendered from /session/latest on load)
+[ ] 4.4  Each exchange pair has a consistent visual order: user turn appears
+          above the corresponding assistant reply
+
+SECTION 5 — ROUTE EXCLUSIVITY
+------------------------------
+[ ] 5.1  Open the browser developer tools → Network tab
+[ ] 5.2  Send one message from the chat input
+[ ] 5.3  Confirm the request goes to exactly ONE route: POST /ui/send
+[ ] 5.4  No request is made to /telegram/webhook from the browser UI
+[ ] 5.5  No "placeholder" or "receipt-only" pattern appears in any network response
+
+SECTION 6 — REJECTION HANDLING (OPERATOR EDGE CASES)
+------------------------------------------------------
+[ ] 6.1  Press Send with an empty input — the UI shows a validation error or
+          prevents the request; the chat trail is not polluted
+[ ] 6.2  The error message is user-readable, not a raw JSON dump
+[ ] 6.3  After the error, the input field is still focusable and accepts new input
+[ ] 6.4  Sending a valid message after the error works normally (assistant replies)
+
+PASS CRITERIA
+-------------
+All items in Sections 1–5 are checked.
+Section 6 items are checked or explicitly noted as not applicable.
+
+OPERATOR SIGN-OFF
+-----------------
+  operator: ___________________
+  date:     ___________________
+  status:   PASS / PATCH
+  notes:    ___________________

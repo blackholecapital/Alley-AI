@@ -1,0 +1,85 @@
+BROWSER CHAT ROUTE CONTRACT
+job_id: EXEC-AI-STAGE4-UIFIX-002
+stage: S3 — Browser Chat Route Unification
+artifact: /job_site/browser_chat_route_contract.txt
+implementation: /worker-wb/src/routes/ui-send.ts
+
+ROUTE
+-----
+  Method:   POST
+  Path:     /ui/send
+  Handler:  handleUiSend (exported from /worker-wb/src/routes/ui-send.ts)
+
+REQUEST
+-------
+  Content-Type:  application/json
+  Body shape:    { "text": string }
+  Constraints:
+    - text must be a non-empty string after trimming
+    - text must be ≤ 4000 characters
+
+RESPONSE — SUCCESS
+------------------
+  Status:  200
+  Body:    {
+             "ok": true,
+             "event_id": string,      // id of the inbound session item
+             "reply_text": string,    // non-placeholder assistant reply
+             "inbound_item": SessionItem,
+             "outbound_item": SessionItem
+           }
+  Headers: Content-Type: application/json
+           Cache-Control: no-store
+
+RESPONSE — ERRORS
+-----------------
+  All error responses carry the shared error envelope:
+    { "ok": false, "error": { "code": string, "message": string } }
+
+  405 method_not_allowed   — non-POST method
+  400 bad_request          — non-JSON body, missing text field, non-string text,
+                             empty/whitespace-only text, text > 4000 chars
+  500 internal_error       — generateAssistantReply threw (reply generation failed)
+
+BEHAVIOUR INVARIANTS
+--------------------
+  1. SINGLE ROUTE: The browser UI sends text via /ui/send only.
+     /telegram/webhook is never called from the browser — it requires the
+     Telegram secret header and is not the browser channel.
+
+  2. NON-PLACEHOLDER REPLY: Every 200 response includes a reply_text produced
+     by generateAssistantReply (shared with the Telegram pipeline).  The reply
+     is never a verbatim echo ("received: <text>") and always contains an
+     assistant-voice sentence.
+
+  3. FULL PERSISTENCE: On every successful exchange the session store receives
+     exactly two items:
+       - direction='inbound'  source='ui'  kind='text'  (the user turn)
+       - direction='outbound' source='ui'  kind='text'  (the assistant reply)
+     Rejected requests (4xx / 5xx) write no items to the store.
+
+  4. FAILURE HANDLING: If generateAssistantReply throws, the inbound is still
+     persisted, a failure item (kind='failure') is recorded via recordFailure
+     with source='ui', and the caller receives a 500 error envelope.
+     The outbound text item is only persisted after a successful reply.
+
+  5. SHARED ASSISTANT PIPELINE: generateAssistantReply is imported from
+     /worker-wb/src/routes/telegram-webhook.ts so the UI and Telegram channels
+     produce identical reply logic from one shared function.
+
+SESSION STORE INTEGRATION
+--------------------------
+  Import path:  /worker-wb/src/lib/session-store.ts
+  Functions used:
+    recordUiInbound(input: UiInboundInput): SessionItem
+    recordUiOutbound(input: UiOutboundInput): SessionItem
+    recordFailure(record: FailureRecord): SessionItem
+
+  The exchange is visible via GET /session/latest so the UI can poll and
+  render the running trail without client-side state.
+
+CONFIRMED BY
+------------
+  Worker A:  /worker-wb/src/routes/ui-send.ts (implementation)
+  Worker B:  /worker-wb/test/browser-chat-route.test.ts (test)
+             /job_site/browser_chat_demo_checklist.txt (operator checklist)
