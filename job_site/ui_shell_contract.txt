@@ -1,0 +1,229 @@
+UI SHELL CONTRACT
+job_id:   EXEC-AI-STAGE4-UIFIX-002
+worker:   WORKER B
+stage:    S2
+artifact: /job_site/ui_shell_contract.txt
+source:   /apps/operator-shell/src/ui/index.html
+          /apps/operator-shell/src/ui/session-view.js
+          /apps/operator-shell/src/ui/voice-capture.js
+          /apps/operator-shell/src/ui/calendar-panel.js
+
+PURPOSE
+Define the exact expected controls, DOM hooks, routes, and behavioral contracts
+for the Stage 4 operator shell. This document is the pass/fail reference for
+S2-CHECK and CF-VERIFY-CHECK.
+
+SCOPE LOCK
+This contract covers exactly the five recovery items declared in
+/job_site/ui_recovery_scope.txt. No other controls or surfaces are in scope.
+
+────────────────────────────────────────────────────────────────────────────────
+CONTRACT 1 — CHAT INPUT
+────────────────────────────────────────────────────────────────────────────────
+Required DOM element:
+  <textarea id="chat-input"> OR <input type="text" id="chat-input">
+  Placement: visible in the main viewport, above or alongside voice footer
+  Attributes: aria-label="Type a message", rows≥2 (textarea) or full-width input
+  Placeholder text: "Type a message…"
+
+Required DOM element (send button):
+  <button id="send-btn">Send</button>
+  aria-label="Send message"
+  Disabled state: when chat-input is empty or a send is in progress
+
+Behavior contract:
+  1. Operator types text into #chat-input
+  2. Operator clicks #send-btn or presses Enter (no shift)
+  3. sendMessage() in session-view.js is called with payload:
+       { text: <trimmed input value>, source: "browser" }
+  4. POST /telegram/webhook with Content-Type: application/json
+  5. On { ok: true }: input cleared, exchange appears in #transcript-log on next
+     poll (≤5 s)
+  6. On { ok: false }: visible error message shown to operator; input preserved
+  7. No placeholder-only replies are acceptable — the assistant must return a
+     real reply visible in #response-log within a reasonable poll window
+
+Route:       POST /telegram/webhook
+Route owner: worker-wb/src/routes/ui-send.ts (to be created in S3)
+Response:    { ok: true } on accepted; any non-true is a failure
+
+Status at S2: MISSING from HTML. sendMessage() exists in session-view.js:336.
+              Must be added before S3-CHECK can pass.
+
+────────────────────────────────────────────────────────────────────────────────
+CONTRACT 2 — BROWSER VOICE ROUTE
+────────────────────────────────────────────────────────────────────────────────
+Required DOM elements (all present in current index.html):
+  #voice-btn-start    aria-label="Start recording"     (Talk)
+  #voice-btn-stop     aria-label="Stop and send recording"  (Stop & Send)
+  #voice-btn-cancel   aria-label="Cancel recording"    (Cancel)
+  #voice-status-badge aria-live="polite"               (state badge)
+  #voice-message      aria-live="polite"               (status text)
+
+State machine contract (voice-capture.js):
+  idle        → start click    → requesting
+  requesting  → permission OK  → recording
+  requesting  → permission NO  → denied
+  requesting  → no device      → denied (message: "No microphone found.")
+  requesting  → unsupported    → unsupported
+  recording   → stop click     → processing
+  recording   → cancel click   → idle
+  processing  → upload done    → sent   (auto-resets to idle after 3 s)
+  processing  → upload fail    → sent   (ok:false, error shown in #voice-message)
+  denied      → start click    → requesting  (retry allowed)
+  error       → start click    → requesting  (retry allowed)
+
+Permission flow contract:
+  On Talk click: browser must show native mic permission prompt
+  On permission denied: #voice-status-badge shows "denied", #voice-message
+    shows "Microphone permission denied. Grant mic access in browser settings
+    and try again."
+  On unsupported browser: #voice-status-badge shows "unsupported", message
+    shows "Voice capture is not supported in this browser. Use Chrome, Edge,
+    or Firefox over HTTPS."
+
+Upload contract:
+  Endpoint:  POST /voice/capture
+  Body:      multipart/form-data, field "audio", filename "recording.webm"
+  MIME type: audio/webm;codecs=opus preferred; audio/webm, audio/ogg, audio/mp4
+             as fallback (MediaRecorder.isTypeSupported order)
+  Success:   { ok: true, session_id?: string }
+  Failure:   { ok: false, error: { code: string, message: string } }
+
+Route owner: worker-wb/src/routes/voice-capture.ts (to be created in S4)
+Status at S2: PRESENT — Talk, Stop & Send, Cancel all present and wired.
+              Backend route /voice/capture must be confirmed in S4.
+
+────────────────────────────────────────────────────────────────────────────────
+CONTRACT 3 — CALENDAR SURFACE
+────────────────────────────────────────────────────────────────────────────────
+Status bar entry point:
+  #status-calendar     — shows "demo ready" / "demo not ready" / "—"
+                         data-state="live" (green) or data-state="error" (red)
+  #calendar-panel-toggle — "⚙ Calendar" button, aria-expanded toggles on click
+
+Calendar drawer (#calendar-panel):
+  Opens via #calendar-panel-toggle or closePanel() / openPanel() in calendar-panel.js
+  Refreshes /calendar/status automatically on open
+
+Drawer sections:
+  Provider section:
+    #calendar-panel-provider   — provider name string (e.g. "demo", "—")
+    #calendar-panel-state      — state pill, one of six closed values (below)
+    #calendar-panel-reason     — hidden unless provider.reason present
+    #calendar-panel-detail     — hidden unless provider.detail present
+
+  Guidance section:
+    #calendar-panel-guidance   — hidden when state is ready or unknown;
+                                 shown for unconfigured, unsupported, not_ready,
+                                 error with exact copy from GUIDANCE map
+
+  Action section:
+    #calendar-panel-action-type — label "calendar.list_today" (static)
+    #calendar-panel-run         — "Run calendar.list_today" button
+                                  disabled only when state === "unknown"
+                                  always enabled for configured and unconfigured
+                                  states (so both paths are operator-testable)
+
+  Result section:
+    #calendar-panel-result       — container, hidden until invocation present
+    #calendar-panel-result-state — "ok" or "fail" pill
+    #calendar-panel-result-reply — reply_text from backend
+    #calendar-panel-result-meta  — "handled_at <ts> · N events" / error code
+
+  Error line:
+    #calendar-panel-error        — shown only on ERROR state; hidden otherwise
+
+Action bar (outside drawer):
+  #calendar-action-bar    — hidden until last invocation present
+  #calendar-action-result — "✓ calendar.list_today ok · N events · HH:MM:SS"
+                             or "✗ calendar.list_today failed (code) · HH:MM:SS"
+
+Six closed UI states (classifyStatus() in calendar-panel.js):
+  unknown       — not fetched yet; pill shows "—"
+  ready         — provider.ready === true; pill green "configured · ready"
+  not_ready     — provider.ready === false, reason ≠ "provider_not_configured"
+                  pill yellow "configured · not ready"
+  unconfigured  — reason === "provider_not_configured" or provider unset
+                  pill muted "unconfigured"
+  unsupported   — reason === "provider_unsupported"
+                  pill red "unsupported provider"
+  error         — route unreachable / non-200 / malformed response
+                  pill red "unreachable"
+
+Routes:
+  GET /calendar/status        — read provider state, no side effects
+  GET /calendar/status?run=1  — dispatch calendar.list_today, return result
+
+Status at S2: PRESENT — drawer, all DOM hooks, JS wiring all present.
+
+────────────────────────────────────────────────────────────────────────────────
+CONTRACT 4 — STATUS STRIP
+────────────────────────────────────────────────────────────────────────────────
+Element:    <header class="status-bar"> — sticky, top:0, z-index:20
+Required DOM hooks and their content:
+  #status-core      — text: "live" | "idle" | "loading…" | "error"
+                      data-state: "live" | "empty" | "loading" | "error"
+  #status-state     — text: current UIRenderState.kind string
+  #status-session   — text: session_id.slice(0,16) or "—"; class="monospace"
+  #status-calendar  — text: "<provider> ready" | "<provider> not ready" | "—"
+                      data-state: "live" (green) | "error" (red)
+  #last-event-marker — text: "last event Xs ago" | "no events yet" | "loading"
+                       hidden at ≤768px
+
+Update frequency: every poll cycle (POLL_MS = 5000 ms)
+Persistence: visible on all viewport sizes; hidden elements collapse gracefully
+
+────────────────────────────────────────────────────────────────────────────────
+CONTRACT 5 — MOBILE-SAFE LAYOUT
+────────────────────────────────────────────────────────────────────────────────
+Viewport:   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+Breakpoint rules:
+  ≤768px:
+    .panels grid-template-columns: 1fr  (single column, stacked panes)
+    .panels grid-template-rows: 1fr 1fr
+    .status-dividers display:none
+    #last-event-marker display:none
+    .voice-footer padding reduced; button font-size 12px
+
+  ≤640px:
+    .calendar-panel width: 100vw; border-left: none
+    (full-screen calendar drawer on narrow phones)
+
+  ≤420px:
+    .voice-btn-label display:none
+    (icon-only voice buttons: 🎙 Talk → mic glyph, Stop & Send → ■, Cancel → ✕)
+
+Pass conditions for mobile-safe layout:
+  a. No horizontal scrollbar appears at 375px viewport width
+  b. All seven required controls remain accessible (tap-target ≥ 34px height)
+  c. Voice footer remains fixed at bottom; no overlap with main panes
+  d. Status bar remains readable (font-size ≥ 12px)
+  e. Calendar drawer fills screen at ≤640px and is scrollable
+
+────────────────────────────────────────────────────────────────────────────────
+PASS CONDITIONS (this contract)
+────────────────────────────────────────────────────────────────────────────────
+S2-CHECK passes when:
+  1. All five contracts above have Status = PRESENT (not MISSING)
+  2. index.html contains #chat-input and #send-btn wired to sendMessage()
+  3. /voice/capture route exists in worker-wb
+  4. /calendar/status and /calendar/status?run=1 routes exist in worker-wb
+  5. Status strip updates live from /session/latest polling
+  6. Mobile breakpoints verified at 375px, 640px, and 768px viewports
+
+CF-VERIFY-CHECK additionally requires:
+  7. Live deployed URL loads index.html from this shell (not a stale or wrong asset)
+  8. Browser console shows no 404s for session-view.js, voice-capture.js,
+     calendar-panel.js
+  9. Talk button triggers browser mic permission prompt on first click
+  10. Calendar drawer opens, shows provider state, and run button is clickable
+
+PATCH CONDITION
+This contract is not met if:
+  - Chat input or send button absent from deployed UI
+  - Talk does not trigger browser mic permission prompt
+  - Calendar drawer does not open or run button does not call /calendar/status?run=1
+  - Status strip does not update (shows "—" indefinitely)
+  - Any required JS module fails to load (404)
