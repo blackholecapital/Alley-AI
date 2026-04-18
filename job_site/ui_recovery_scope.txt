@@ -1,38 +1,39 @@
 UI RECOVERY SCOPE
-job_id: EXEC-AI-STAGE4-UIFIX-002
+job_id: EXEC-AI-STAGE4-UIFIX-002A
 worker: WORKER B
 stage: S1
 artifact: /job_site/ui_recovery_scope.txt
-reference: /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+reference: /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
 
 SCOPE LOCK — THIS RUN IS LIMITED TO THE FOLLOWING FIVE ITEMS ONLY
 
-1. DEPLOYED ASSET ALIGNMENT
-   Scope: Ensure the live deployed UI exactly matches the repo-owned Stage 4 UI shell.
+1. EXPLICIT ROUTE WIRING
+   Scope: All active browser routes must be explicitly declared and wired. No implicit, fallback, or catch-all route behavior is permitted for chat, voice, or calendar paths. Each route must have a single known handler with a declared contract.
+   Out of scope: New route creation beyond the three declared browser surfaces, backend routing restructure, or telephony route changes.
+
+2. DEPLOYED UI ASSET ALIGNMENT
+   Scope: Ensure the live deployed UI exactly matches the repo-owned Stage 4 UI shell. Stale or mismatched asset wiring must be removed.
    Out of scope: Any new UI features, redesign, or changes to operator intelligence behavior.
 
-2. ONE BROWSER CHAT ROUTE
-   Scope: One browser text chat path that produces a non-placeholder assistant reply and persists the visible exchange.
+3. ONE BROWSER CHAT ROUTE
+   Scope: One browser text chat path that produces a non-placeholder assistant reply and persists the visible exchange. Route must be explicitly wired per item 1.
    Out of scope: Multiple chat backends, telephony chat paths, or assistant intelligence tuning.
 
-3. ONE BROWSER VOICE ROUTE
-   Scope: One browser voice path that requests mic permission, enters visible recording state, and submits captured audio to one real backend route.
+4. ONE BROWSER VOICE ROUTE
+   Scope: One browser voice path that requests mic permission, enters visible recording state, and submits captured audio to one real backend route. Route must be explicitly wired per item 1.
    Out of scope: Telephony voice, PSTN, SIP, outbound call flows, or voice model changes.
 
-4. ONE CALENDAR SURFACE
-   Scope: One visible calendar surface in the UI that shows provider state, required setup state, and one testable action path from the browser.
+5. ONE BROWSER CALENDAR SURFACE
+   Scope: One visible calendar surface in the UI that shows provider state, required setup state, and one testable action path from the browser. Route must be explicitly wired per item 1.
    Out of scope: New calendar integrations, multi-provider setup, or assistant scheduling intelligence.
-
-5. ONE MOBILE-USABLE SHELL
-   Scope: The operator shell must be usable on a mobile viewport without broken layout or inaccessible controls.
-   Out of scope: Native mobile apps, PWA features, or platform-specific mobile builds.
 
 OUT-OF-SCOPE EXCLUSIONS (HARD LOCK)
 - No assistant intelligence work
 - No telephony routes or PSTN work
 - No broad UI redesign beyond aligning to the intended Stage 4 control surface
 - No new backend services or integrations beyond the declared voice capture and chat routes
+- No mobile-specific shell work (deferred from prior run)
 - No feature work beyond what is required to make the five scope items above operator-testable from the browser
 
 PASS CONDITION
-All five scope items are operator-testable from the live deployed browser UI. No out-of-scope work is included in this run.
+All five scope items are operator-testable from the live deployed browser UI. All three browser routes (chat, voice, calendar) are explicitly wired with declared contracts. No out-of-scope work is included in this run.
