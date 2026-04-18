@@ -1,0 +1,33 @@
+BROWSER CHAT ROUTE CONTRACT
+job_id: EXEC-AI-STAGE4-UIFIX-002
+stage: S3
+produced_by: WORKER A
+
+canonical_browser_send_route: /ui/send
+method: POST
+content_type: application/json
+request_body: {"text": "<string, 1–4000 chars>"}
+success_response: {"ok": true, "event_id": "<id>", "reply_text": "<string>", "inbound_item": {...}, "outbound_item": {...}}
+error_response: {"ok": false, "error": "<code>", "message": "<string>", "correlationId": "<id>"}
+auth_required: none (no Telegram secret header)
+
+retired_path: /telegram/webhook
+reason_retired_for_browser: requires x-telegram-bot-api-secret-token header; browser requests fail
+  the secret check silently, return {"ok": true} with no message recorded and no reply generated —
+  producing non-deterministic placeholder behavior
+
+assistant_reply_generator: generateAssistantReply() in worker-wb/src/routes/telegram-webhook.ts
+  shared by both /ui/send and /telegram/webhook; no echo/placeholder logic
+  every call returns a real assistant-voice reply
+
+ui_send_wiring:
+  file: apps/operator-shell/src/ui/session-view.js
+  constant: SEND_ENDPOINT = '/ui/send'
+  function: sendMessage(payload) — POSTs to SEND_ENDPOINT, expects data.ok === true
+
+worker_route_registration:
+  file: worker-wb/src/index.ts
+  handler: handleUiSend(request, logger)
+  path: /ui/send
+
+pass_condition: browser text input → POST /ui/send → assistant reply recorded → visible in /session/latest poll
