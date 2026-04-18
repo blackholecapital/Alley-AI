@@ -130,6 +130,7 @@ export interface FailureRecord {
   chat_id: number;
   failure_code: string;
   failure_message: string;
+  source?: SessionItemSource;
   at?: string;
 }
 
@@ -137,7 +138,7 @@ export function recordFailure(record: FailureRecord): SessionItem {
   const item: SessionItem = {
     id: `fail:${record.event_id}`,
     direction: 'outbound',
-    source: 'telegram',
+    source: record.source ?? 'telegram',
     kind: 'failure',
     chat_id: record.chat_id,
     message_id: null,
