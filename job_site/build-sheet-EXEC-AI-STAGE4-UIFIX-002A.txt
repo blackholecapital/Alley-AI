@@ -1,0 +1,177 @@
+BUILD SHEET
+
+form_id: BUILD-SHEET-STANDARD-SHORT-v3
+form_name: BROWSER INPUT TEST + FAILURE ISOLATION — EXEC-AI-STAGE4-UIFIX-002A
+
+1. JOB
+   1.1 job_id: EXEC-AI-STAGE4-UIFIX-002A
+   1.2 job_name: Executive AI Assistant Stage 4 — Browser Chat Input Test and Failure Isolation Proof
+   1.3 objective: Add one browser-only test proving that POST /ui/send produces a non-placeholder
+       assistant reply and persists a visible exchange, and include a failure-isolated case
+       proving that transcription provider failure (e.g. Deepgram 401 INVALID_AUTH) does not
+       block the chat response path.
+   1.4 requested_outcome: /worker-wb/test/browser-chat-route.test.ts contains R16 contracts
+       (failure isolation); /job_site/browser_chat_demo_checklist.txt contains Section 7
+       (operator verification of failure isolation); both artifacts are committed and pushed.
+   1.5 target_root_path: /worker-wb/test
+   1.6 target_repo_url: https://github.com/blackholecapital/ALI-ai
+   1.7 inspection_url: https://github.com/blackholecapital/ALI-ai/tree/main
+
+2. RUN CONTROL
+   2.1 mode: single
+   2.2 execution_foreman: Foreman A
+   2.3 checksum_foreman: Foreman B
+   2.4 final_validator: Factory Control Interface
+
+3. TAG FORMAT
+   3.1 foreman_header
+   3.1.1 job_id:
+   3.1.2 foreman:
+   3.1.3 current_stage:
+   3.1.4 current_pass:
+   3.1.5 next_stage:
+   3.1.6 next_owner:
+   3.1.7 passes_remaining:
+   3.1.8 status:
+   3.1.9 current_action:
+
+3.2 worker_tag_format
+3.2.1 [PROJECT | WORKER | STAGE | RESULT]
+
+4. PATHS
+   4.1 stage_activity_log: /job_site/stage_activity_log.txt
+   4.2 final_checksum_path: /job_site/final_checksum.txt
+   4.3 final_tps_report: /job_site/TPS_REPORT.txt
+
+5. REFERENCES
+   5.1 required_references:
+   5.1.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
+   5.1.2 /job_site/browser_chat_route_contract.txt
+   5.2 parent_build_sheet: /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+
+6. STAGE
+   6.1 stage_id: S3
+   6.2 stage_name: Browser Chat Route Unification — Failure Isolation Addendum
+   6.3 stage_owner: Worker B
+   6.4 stage_goal: Prove that browser text input through POST /ui/send produces a non-placeholder
+       assistant reply, persists a visible inbound+outbound exchange, and is structurally isolated
+       from transcription provider failures.
+   6.5 stage_inputs:
+   6.5.1 /worker-wb/src/routes/ui-send.ts
+   6.5.2 /worker-wb/src/lib/session-store.ts
+   6.5.3 /job_site/browser_chat_route_contract.txt
+   6.5.4 live UI screenshot showing transcription failure in response pane
+
+6.6 worker_b_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002A | WORKER B | S3 | RESULT]
+6.6.2 expected_status: PASS
+6.6.3 task:
+6.6.3.1 Add browser-only test contracts R16a and R16b to
+        /worker-wb/test/browser-chat-route.test.ts proving that a transcription
+        failure item already present in the session store does not prevent
+        POST /ui/send from returning { ok: true, reply_text } with a non-placeholder
+        assistant sentence.
+6.6.3.2 Add Section 7 (Failure Isolation) to /job_site/browser_chat_demo_checklist.txt
+        with operator steps for provoking a transcription failure then sending a text
+        message and verifying the chat reply is unblocked.
+6.6.3.3 Create /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt as the authoritative
+        build sheet reference for this addendum work order.
+6.6.4 expected_artifacts:
+6.6.4.1 /worker-wb/test/browser-chat-route.test.ts  (R16 contracts added)
+6.6.4.2 /job_site/browser_chat_demo_checklist.txt   (Section 7 added)
+6.6.4.3 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
+6.6.5 required_references:
+6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
+6.6.5.2 /job_site/browser_chat_route_contract.txt
+6.6.6 repo_mirror_required: yes
+6.6.7 commit_required: yes
+6.6.8 push_required: yes
+
+6.7 required_stage_artifacts:
+6.7.1 /worker-wb/test/browser-chat-route.test.ts
+6.7.2 /job_site/browser_chat_demo_checklist.txt
+6.7.3 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
+6.8 checkpoint_id: S3A-CHECK
+
+7. VALIDATION CHECKS
+   7.1 pass_condition:
+       - R16 tests pass: handleUiSend returns { ok: true, reply_text } with a
+         non-placeholder sentence even when a transcription failure item exists
+         in the session store.
+       - Session store contains both the failure item and the new chat exchange
+         after a text send (3 total items: 1 failure + 1 inbound + 1 outbound).
+       - Checklist Section 7 steps are operator-executable against the live UI.
+   7.2 patch_condition: R16 tests fail; transcription failure state bleeds into
+       the /ui/send code path; placeholder reply is returned after failure.
+   7.3 handoff_on_pass:
+   7.3.1 next_stage: S3-CHECK complete — advance per parent build sheet
+   7.3.2 next_owner: Foreman A
+   7.4 handoff_on_patch:
+   7.4.1 return_stage: S3A
+   7.4.2 return_owner: Worker B
+   7.5 handoff_on_error:
+   7.5.1 return_to: Factory Control Interface
+
+8. FAILURE ISOLATION RATIONALE
+   8.1 Background: The live deployed UI (ali-ai.xyz-labs.xyz) logs
+       "[transcription_failed] provider=deepgram reason=deepgram 401 INVALID_AUTH"
+       in the response pane. This is a voice-path-only failure. The /ui/send
+       route does not import or call any transcription provider; it imports only
+       generateAssistantReply (from telegram-webhook.ts) and the session store
+       helpers (recordUiInbound, recordUiOutbound, recordFailure). The failure
+       isolation is therefore structural, not configuration-dependent.
+   8.2 Test strategy: inject a failure item via recordFailure() directly into the
+       session store (as /voice/capture would), then call handleUiSend() and assert
+       the response is { ok: true, reply_text: <non-placeholder> }.
+   8.3 Expected store state after test: 3 items — kind=failure (pre-injected) +
+       kind=text/inbound + kind=text/outbound.
+
+9. FOREMAN OUTPUT FORM
+   9.1 job_id:
+   9.2 foreman:
+   9.3 current_stage:
+   9.4 current_pass:
+   9.5 next_stage:
+   9.6 next_owner:
+   9.7 passes_remaining:
+   9.8 status:
+   9.9 current_action:
+   9.10 artifacts:
+   9.11 checkpoint_result:
+   9.12 handoff_instruction:
+   9.13 issue:
+
+10. WORKER DISPATCH FORM
+    10.1 [PROJECT | WORKER | STAGE | RESULT]
+    10.2 expected_status:
+    10.3 task:
+    10.4 expected_artifacts:
+    10.5 required_references:
+    10.6 repo_mirror_required:
+    10.7 commit_required:
+    10.8 push_required:
+
+11. WORKER RESULT FORM
+    11.1 [EXEC-AI-STAGE4-UIFIX-002A | WORKER B | S3 | RESULT]
+    11.2 status: PASS
+    11.3 artifacts:
+    11.3.1 /worker-wb/test/browser-chat-route.test.ts — R16 contracts added (failure isolation)
+    11.3.2 /job_site/browser_chat_demo_checklist.txt — Section 7 added (failure isolation steps)
+    11.3.3 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt — created as authoritative ref
+    11.4 summary: Added R16 failure-isolation tests to browser-chat-route.test.ts.
+         Two new test cases prove that a pre-injected transcription failure item in the
+         session store does not prevent POST /ui/send from returning a non-placeholder
+         assistant reply. The checklist gains Section 7 for live operator verification.
+    11.5 issues:
+
+FORM LAW BLOCK
+L1. stage numbering must use S1, S2, S3 format only
+L2. field numbering must use 1.1, 1.2, 1.3 format only
+L3. foreman status values allowed: PASS | PATCH | ERROR
+L4. worker status values allowed: PASS | PATCH
+L5. unused fields must remain blank
+L6. do not delete fields from the template
+L7. all expected_artifacts must be exact target paths
+L8. worker dispatch tag must exactly match worker result tag format
+L9. required_references only in worker orders
+L10. all file writes must use declared target paths only
