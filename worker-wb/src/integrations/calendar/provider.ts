@@ -5,10 +5,15 @@
 // interface. Missing/invalid configuration is a first-class outcome
 // returned as CalendarReadResult.ok=false, not an exception.
 //
-// Stage 3 scope is exactly one read-only action (list today's schedule),
-// so only readTodaysSchedule is declared. No create, no update, no delete.
+// Scope lock: exactly one read-only action (list today's schedule). Only
+// readTodaysSchedule is declared. No create, no update, no delete.
+//
+// Stage 4 S4 (Worker B) keeps this contract intact but documents that
+// CalendarProviderStatus is the canonical source of truth for the UI
+// badge — handler and UI view both read it through the same shape.
 //
 // Ref: build-sheet-EXEC-AI-STAGE3-004 S4 (single calendar action).
+// Ref: build-sheet-EXEC-AI-STAGE4-001 S4 (UI-triggerable calendar action).
 
 export interface CalendarEvent {
   event_id: string;

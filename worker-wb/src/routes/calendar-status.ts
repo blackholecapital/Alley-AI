@@ -1,21 +1,25 @@
 // Calendar status route.
 //
 // Public runtime surface for the single calendar action boundary. Operators
-// and the UI hit GET /calendar/status to see:
-//   - which provider is wired (name + ready)
-//   - the registered action type (exactly one in Stage 3 scope)
-//   - the most recent invocation outcome from this isolate (if any)
+// and the UI hit:
+//   GET  /calendar/status         → provider readiness, no side effects
+//   GET  /calendar/status?run=1   → UI trigger for the single action
+//   HEAD /calendar/status         → readiness probe, no body
 //
-// An optional `?run=1` query parameter dispatches the single action and
-// returns its ActionResult in the same payload so the operator demo can
-// exercise the whole boundary with one request. When `run` is absent the
-// route returns provider readiness only (no side effects).
+// All read/trigger variants return HTTP 200 regardless of provider state.
+// Failure is a value returned inside the body (invocation.ok=false), never
+// a thrown exception and never a non-200 status. The body always carries a
+// pre-formatted `ui` block (provider badge, trigger enablement, last-result
+// summary) so the operator shell can render the calendar surface without
+// re-deriving state from raw invocations.
 //
-// This route NEVER throws: any error path is rendered through the shared
-// errorResponse helper or folded into the JSON body as a readable failure.
+// Stage 4 S4 (Worker B) tightening: the `ui` view block, the `triggered_by`
+// discriminator, and pinned UI-facing test coverage. The HTTP method
+// surface is unchanged from Stage 3 (POST remains 405) to preserve the
+// Stage 3 contract. The UI trigger is GET /calendar/status?run=1.
 //
-// Ref: build-sheet-EXEC-AI-STAGE3-004 S4 (single calendar action + runtime
-//      status route). required_public_test_routes includes /calendar/status.
+// Ref: build-sheet-EXEC-AI-STAGE3-004 S4 (single calendar action).
+// Ref: build-sheet-EXEC-AI-STAGE4-001 S4 (UI-triggerable calendar action).
 
 import {
   ActionRouter,
@@ -25,6 +29,7 @@ import { errorResponse, jsonResponse } from '../lib/errors';
 import type { Logger } from '../lib/logging';
 import {
   CALENDAR_LIST_TODAY,
+  buildCalendarUiView,
   registerCalendarActions,
   type CalendarEnv,
 } from '../integrations/calendar';
@@ -61,21 +66,30 @@ export async function handleCalendarStatus(
   const providerStatus = provider.status();
 
   const url = new URL(request.url);
-  const shouldRun = truthy(url.searchParams.get('run'));
+  const runParam = truthy(url.searchParams.get('run'));
+  const shouldRun = runParam && request.method === 'GET';
 
   let invocation: ActionResult | null = null;
-  if (shouldRun && request.method === 'GET') {
+  if (shouldRun) {
     invocation = await router.dispatch(
-      { action_type: CALENDAR_LIST_TODAY, correlation_id: logger.correlationId },
+      {
+        action_type: CALENDAR_LIST_TODAY,
+        correlation_id: logger.correlationId,
+      },
       logger,
     );
     lastResult = invocation;
   }
 
+  const triggeredBy: 'none' | 'get_run' = shouldRun ? 'get_run' : 'none';
+
+  const ui = buildCalendarUiView(providerStatus, lastResult);
+
   logger.debug('calendar.status.served', {
+    method: request.method,
     provider: providerStatus.provider,
     provider_ready: providerStatus.ready,
-    ran: invocation !== null,
+    triggered_by: triggeredBy,
     invocation_ok: invocation?.ok ?? null,
   });
 
@@ -101,8 +115,10 @@ export async function handleCalendarStatus(
       config: {
         timezone_offset_minutes: offset_minutes,
       },
+      triggered_by: triggeredBy,
       invocation,
       last_result: lastResult,
+      ui,
     },
     {
       correlationId: logger.correlationId,
