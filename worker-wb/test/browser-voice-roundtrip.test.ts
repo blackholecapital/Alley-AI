@@ -162,7 +162,7 @@ test('R1: valid audio POST → 200 { ok: true, session_id }', async () => {
   );
 });
 
-test('R1: valid audio POST → exactly ONE inbound session item appended', async () => {
+test('R1: stub path POST → inbound + failure recorded (completion contract)', async () => {
   __resetForTests();
   await handleVoiceCapture(
     audioRequest({ mimeType: 'audio/webm', sizeBytes: 512 }),
@@ -170,9 +170,15 @@ test('R1: valid audio POST → exactly ONE inbound session item appended', async
     makeLogger(),
   );
   const snap = getLatest(10);
-  assertEq(snap.counts.total, 1, 'one item appended to session store');
-  assertEq(snap.counts.inbound, 1, 'item is inbound');
-  assertEq(snap.counts.outbound, 0, 'no outbound (reply handling not required this stage)');
+  // S4 S3 contract: every capture must close the loop. With NOOP_ENV the
+  // transcription provider is not ready, so the loop closes via recordFailure
+  // (direction='outbound', kind='failure'). One inbound + one failure = 2.
+  assertEq(snap.counts.total, 2, 'inbound + failure persisted (loop closed)');
+  assertEq(snap.counts.inbound, 1, 'one inbound item recorded');
+  assertEq(snap.counts.outbound, 1, 'failure entry recorded as outbound (kind=failure)');
+  const failure = snap.items.find((i) => i.kind === 'failure');
+  assertTrue(failure !== undefined, 'failure item must exist when transcription is unavailable');
+  assertEq(failure!.source, 'ui', 'failure item source must be ui (not telegram) for /voice/capture');
 });
 
 test('R1: response session_id matches session store session_id', async () => {
@@ -193,7 +199,7 @@ test('R1: response session_id matches session store session_id', async () => {
 
 // ─── R2: Stub item text ───────────────────────────────────────────────────────
 
-test('R2: stub path records non-null session item text encoding mime and size', async () => {
+test('R2: stub path inbound item text encodes mime and size', async () => {
   __resetForTests();
   await handleVoiceCapture(
     audioRequest({ mimeType: 'audio/webm', sizeBytes: 2048 }),
@@ -201,18 +207,22 @@ test('R2: stub path records non-null session item text encoding mime and size', 
     makeLogger(),
   );
   const snap = getLatest(5);
-  const item = snap.items[0]!;
+  // Find the inbound item explicitly — getLatest is newest-first, so under
+  // the new completion contract the first item is the failure, not the
+  // inbound. The inbound is what carries the readable mime/size encoding.
+  const inbound = snap.items.find((i) => i.direction === 'inbound');
+  assertTrue(inbound !== undefined, 'inbound item must exist after capture');
   assertTrue(
-    typeof item.text === 'string' && item.text!.length > 0,
-    'session item text is non-null and non-empty on stub path',
+    typeof inbound!.text === 'string' && inbound!.text!.length > 0,
+    'inbound item text is non-null and non-empty on stub path',
   );
   assertTrue(
-    item.text!.includes('audio/webm'),
-    'stub item text encodes the MIME type so the session trail is readable',
+    inbound!.text!.includes('audio/webm'),
+    'inbound item text encodes the MIME type so the session trail is readable',
   );
   assertTrue(
-    item.text!.includes('2048'),
-    'stub item text encodes the byte size',
+    inbound!.text!.includes('2048'),
+    'inbound item text encodes the byte size',
   );
 });
 
@@ -239,13 +249,18 @@ test('R3: two consecutive captures share one stable session_id', async () => {
   );
 });
 
-test('R3: two captures → two session items in the store', async () => {
+test('R3: two captures → four session items (inbound + failure each)', async () => {
   __resetForTests();
   await handleVoiceCapture(audioRequest({ mimeType: 'audio/webm', sizeBytes: 512 }), NOOP_ENV, makeLogger());
   await handleVoiceCapture(audioRequest({ mimeType: 'audio/ogg',  sizeBytes: 512 }), NOOP_ENV, makeLogger());
   const snap = getLatest(10);
+  // S4 S3 contract: every capture closes its loop. Two stub-path captures =
+  // two inbound + two failure entries (failure is direction='outbound').
   assertEq(snap.counts.inbound, 2, 'two inbound items after two captures');
-  assertEq(snap.counts.total, 2, 'total matches');
+  assertEq(snap.counts.outbound, 2, 'two failure entries after two stub-path captures');
+  assertEq(snap.counts.total, 4, 'total matches: in + fail + in + fail');
+  const failures = snap.items.filter((i) => i.kind === 'failure');
+  assertEq(failures.length, 2, 'exactly two failure items recorded');
 });
 
 // ─── R4: Method guard ─────────────────────────────────────────────────────────
