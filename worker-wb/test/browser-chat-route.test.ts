@@ -1,7 +1,7 @@
 /**
- * Browser Chat Route — Stage UIFIX-002 S3 | Worker B
- * ---------------------------------------------------
- * Build sheet: /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+ * Browser Chat Route — Stage UIFIX-002A S3 | Worker B
+ * ----------------------------------------------------
+ * Build sheet: /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
  * Stage:       S3 (Browser Chat Route Unification)
  * Contract:    /job_site/browser_chat_route_contract.txt
  *
@@ -9,6 +9,7 @@
  *   - text input → non-placeholder assistant reply
  *   - inbound + outbound persisted to session store
  *   - full rejection envelope contract for all error paths
+ *   - failure isolation: transcription provider failure must not block chat reply
  *
  * Run with:
  *
@@ -34,11 +35,14 @@
  *   R13. All rejection responses carry { ok: false, error: { code, message } }
  *   R14. Rejection requests do not pollute the session store
  *   R15. Handler never throws — always returns a Response
+ *   R16. Transcription provider failure in session store does not block chat reply
+ *        (/ui/send is structurally isolated from the voice/transcription pipeline)
  */
 
 import { handleUiSend } from '../src/routes/ui-send';
 import {
   getLatest,
+  recordFailure,
   __resetForTests,
 } from '../src/lib/session-store';
 import type { Logger } from '../src/lib/logging';
@@ -449,6 +453,58 @@ test('R15: handler never throws — always returns a Response', async () => {
     }
     assertTrue(!threw, `${label}: handler must never throw`);
   }
+});
+
+// ─── R16: Transcription failure isolation ────────────────────────────────────
+// /ui/send never calls the transcription pipeline. This test proves that even
+// when a transcription failure item is present in the session store (as occurs
+// when /voice/capture receives a 401 from Deepgram), the chat route is
+// completely unaffected and still returns a real assistant reply.
+
+test('R16: transcription provider failure in store does not block /ui/send reply', async () => {
+  __resetForTests();
+  // Inject a transcription failure exactly as /voice/capture would after a
+  // Deepgram 401: {"err_code":"INVALID_AUTH",...}
+  recordFailure({
+    event_id: 'voice-test-event-auth-fail',
+    chat_id: 0,
+    failure_code: 'transcription_failed',
+    failure_message: 'deepgram 401: {"err_code":"INVALID_AUTH","err_msg":"Invalid credentials."}',
+    source: 'ui',
+  });
+
+  const res = await handleUiSend(postJson({ text: 'what is on my schedule today?' }), makeLogger());
+  assertEq(res.status, 200, 'chat route returns 200 even when transcription failure is in store');
+  const body = await parseBody(res);
+  assertEq(body['ok'], true, 'ok is true despite prior transcription failure');
+  const reply = body['reply_text'] as string;
+  assertTrue(reply.length >= 10, 'reply_text is a meaningful assistant sentence');
+  assertTrue(
+    !reply.toLowerCase().startsWith('received:'),
+    'reply is not a placeholder despite transcription failure in store',
+  );
+});
+
+test('R16: session store contains both the failure item and the new exchange after text send', async () => {
+  __resetForTests();
+  recordFailure({
+    event_id: 'voice-failure-pre',
+    chat_id: 0,
+    failure_code: 'transcription_failed',
+    failure_message: 'provider=deepgram reason=401 INVALID_AUTH',
+    source: 'ui',
+  });
+  // The failure item is already in store (counted as outbound kind=failure)
+  await handleUiSend(postJson({ text: 'hi' }), makeLogger());
+  const snap = getLatest(10);
+  // Store must hold: 1 failure + 1 chat inbound + 1 chat outbound = 3 total
+  assertEq(snap.counts.total, 3, 'failure item plus chat exchange = 3 store items');
+  const failItem = snap.items.find((i) => i.kind === 'failure');
+  assertTrue(failItem !== undefined, 'failure item is preserved in session trail');
+  const chatInbound = snap.items.find((i) => i.direction === 'inbound' && i.kind === 'text');
+  assertTrue(chatInbound !== undefined, 'chat inbound item is present alongside failure item');
+  const chatOutbound = snap.items.find((i) => i.direction === 'outbound' && i.kind === 'text');
+  assertTrue(chatOutbound !== undefined, 'chat outbound reply is present alongside failure item');
 });
 
 // ─── Runner ───────────────────────────────────────────────────────────────────
