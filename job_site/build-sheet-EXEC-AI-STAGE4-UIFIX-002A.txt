@@ -1,19 +1,18 @@
 BUILD SHEET
 
 form_id: BUILD-SHEET-STANDARD-SHORT-v3
-form_name: BROWSER INPUT TEST + FAILURE ISOLATION — EXEC-AI-STAGE4-UIFIX-002A
+form_name: BROWSER CHAT PATH FIX — EXEC-AI-STAGE4-UIFIX-002A
 
 1. JOB
    1.1 job_id: EXEC-AI-STAGE4-UIFIX-002A
-   1.2 job_name: Executive AI Assistant Stage 4 — Browser Chat Input Test and Failure Isolation Proof
-   1.3 objective: Add one browser-only test proving that POST /ui/send produces a non-placeholder
-       assistant reply and persists a visible exchange, and include a failure-isolated case
-       proving that transcription provider failure (e.g. Deepgram 401 INVALID_AUTH) does not
-       block the chat response path.
-   1.4 requested_outcome: /worker-wb/test/browser-chat-route.test.ts contains R16 contracts
-       (failure isolation); /job_site/browser_chat_demo_checklist.txt contains Section 7
-       (operator verification of failure isolation); both artifacts are committed and pushed.
-   1.5 target_root_path: /worker-wb/test
+   1.2 job_name: Executive AI Assistant Stage 4 — Browser Chat Path Unification (Follow-up to 002 S3)
+   1.3 objective: Lock /ui/send as the single canonical browser chat route, remove any conflicting
+       placeholder path behavior, and ensure the live UI returns one deterministic non-placeholder
+       assistant response independent of voice and transcription providers.
+   1.4 requested_outcome: /ui/send is confirmed as the one browser chat path; all stale references
+       to /telegram/webhook as a browser send path are removed; generateAssistantReply() is confirmed
+       deterministic with no external service dependency; deployed session-view.js matches source.
+   1.5 target_root_path: /worker-wb/src/routes
    1.6 target_repo_url: https://github.com/blackholecapital/ALI-ai
    1.7 inspection_url: https://github.com/blackholecapital/ALI-ai/tree/main
 
@@ -45,86 +44,79 @@ form_name: BROWSER INPUT TEST + FAILURE ISOLATION — EXEC-AI-STAGE4-UIFIX-002A
 
 5. REFERENCES
    5.1 required_references:
-   5.1.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
-   5.1.2 /job_site/browser_chat_route_contract.txt
-   5.2 parent_build_sheet: /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+   5.1.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002.txt
+   5.1.2 /job_site/ui_shell_contract.txt
+   5.1.3 /job_site/browser_chat_route_contract.txt
+   5.1.4 /job_site/ui_failure_lock.txt
+   5.2 external_references:
+   5.2.1 https://github.com/blackholecapital/ALI-ai
 
 6. STAGE
    6.1 stage_id: S3
-   6.2 stage_name: Browser Chat Route Unification — Failure Isolation Addendum
-   6.3 stage_owner: Worker B
-   6.4 stage_goal: Prove that browser text input through POST /ui/send produces a non-placeholder
-       assistant reply, persists a visible inbound+outbound exchange, and is structurally isolated
-       from transcription provider failures.
+   6.2 stage_name: Browser Chat Route Unification (002A follow-up)
+   6.3 stage_owner: Worker A
+   6.4 stage_goal: Select one browser chat path only (/ui/send), remove conflicting placeholder
+       comments referencing /telegram/webhook as the browser send path, and confirm the route
+       returns a real assistant reply independent of voice/transcription providers.
    6.5 stage_inputs:
-   6.5.1 /worker-wb/src/routes/ui-send.ts
-   6.5.2 /worker-wb/src/lib/session-store.ts
-   6.5.3 /job_site/browser_chat_route_contract.txt
-   6.5.4 live UI screenshot showing transcription failure in response pane
+   6.5.1 worker-wb/src/routes/ui-send.ts
+   6.5.2 worker-wb/public/session-view.js (deployed)
+   6.5.3 apps/operator-shell/src/ui/session-view.js (source)
+   6.5.4 job_site/browser_chat_route_contract.txt
 
-6.6 worker_b_order
-6.6.1 [EXEC-AI-STAGE4-UIFIX-002A | WORKER B | S3 | RESULT]
+6.6 worker_a_order
+6.6.1 [EXEC-AI-STAGE4-UIFIX-002A | WORKER A | S3 | RESULT]
 6.6.2 expected_status: PASS
 6.6.3 task:
-6.6.3.1 Add browser-only test contracts R16a and R16b to
-        /worker-wb/test/browser-chat-route.test.ts proving that a transcription
-        failure item already present in the session store does not prevent
-        POST /ui/send from returning { ok: true, reply_text } with a non-placeholder
-        assistant sentence.
-6.6.3.2 Add Section 7 (Failure Isolation) to /job_site/browser_chat_demo_checklist.txt
-        with operator steps for provoking a transcription failure then sending a text
-        message and verifying the chat reply is unblocked.
-6.6.3.3 Create /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt as the authoritative
-        build sheet reference for this addendum work order.
+6.6.3.1 Remove stale /telegram/webhook comments from worker-wb/public/session-view.js that
+        conflict with the locked /ui/send browser path.
+6.6.3.2 Sync worker-wb/public/session-view.js to match apps/operator-shell/src/ui/session-view.js
+        (repo_mirror_required).
+6.6.3.3 Update browser_chat_route_contract.txt with S3 PASS confirmation and evidence.
+6.6.3.4 Confirm ui-send.ts has no dependency on voice/transcription providers.
 6.6.4 expected_artifacts:
-6.6.4.1 /worker-wb/test/browser-chat-route.test.ts  (R16 contracts added)
-6.6.4.2 /job_site/browser_chat_demo_checklist.txt   (Section 7 added)
-6.6.4.3 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
+6.6.4.1 /worker-wb/src/routes/ui-send.ts
+6.6.4.2 /job_site/browser_chat_route_contract.txt
 6.6.5 required_references:
 6.6.5.1 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
-6.6.5.2 /job_site/browser_chat_route_contract.txt
+6.6.5.2 /job_site/ui_shell_contract.txt
 6.6.6 repo_mirror_required: yes
 6.6.7 commit_required: yes
 6.6.8 push_required: yes
 
-6.7 required_stage_artifacts:
-6.7.1 /worker-wb/test/browser-chat-route.test.ts
-6.7.2 /job_site/browser_chat_demo_checklist.txt
-6.7.3 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt
-6.8 checkpoint_id: S3A-CHECK
+6.8 required_stage_artifacts:
+6.8.1 /worker-wb/src/routes/ui-send.ts
+6.8.2 /job_site/browser_chat_route_contract.txt
+6.9 checkpoint_id: S3-CHECK
 
 7. VALIDATION CHECKS
    7.1 pass_condition:
-       - R16 tests pass: handleUiSend returns { ok: true, reply_text } with a
-         non-placeholder sentence even when a transcription failure item exists
-         in the session store.
-       - Session store contains both the failure item and the new chat exchange
-         after a text send (3 total items: 1 failure + 1 inbound + 1 outbound).
-       - Checklist Section 7 steps are operator-executable against the live UI.
-   7.2 patch_condition: R16 tests fail; transcription failure state bleeds into
-       the /ui/send code path; placeholder reply is returned after failure.
+       - SEND_ENDPOINT = '/ui/send' confirmed in session-view.js (source and deployed)
+       - No stale /telegram/webhook comments remain in deployed session-view.js
+       - generateAssistantReply() is deterministic with no transcription provider dependency
+       - ui-send.ts handler verified: inbound record → reply → outbound record → {ok, reply_text}
+       - deployed mirror (worker-wb/public/) matches canonical source (apps/operator-shell/src/ui/)
+   7.2 patch_condition: Stale /telegram/webhook references remain, session-view.js deployed ≠ source,
+       or ui-send.ts calls any voice/transcription service.
    7.3 handoff_on_pass:
-   7.3.1 next_stage: S3-CHECK complete — advance per parent build sheet
+   7.3.1 next_stage: S4
    7.3.2 next_owner: Foreman A
    7.4 handoff_on_patch:
-   7.4.1 return_stage: S3A
-   7.4.2 return_owner: Worker B
+   7.4.1 return_stage: S3
+   7.4.2 return_owner: Foreman A
    7.5 handoff_on_error:
    7.5.1 return_to: Factory Control Interface
 
-8. FAILURE ISOLATION RATIONALE
-   8.1 Background: The live deployed UI (ali-ai.xyz-labs.xyz) logs
-       "[transcription_failed] provider=deepgram reason=deepgram 401 INVALID_AUTH"
-       in the response pane. This is a voice-path-only failure. The /ui/send
-       route does not import or call any transcription provider; it imports only
-       generateAssistantReply (from telegram-webhook.ts) and the session store
-       helpers (recordUiInbound, recordUiOutbound, recordFailure). The failure
-       isolation is therefore structural, not configuration-dependent.
-   8.2 Test strategy: inject a failure item via recordFailure() directly into the
-       session store (as /voice/capture would), then call handleUiSend() and assert
-       the response is { ok: true, reply_text: <non-placeholder> }.
-   8.3 Expected store state after test: 3 items — kind=failure (pre-injected) +
-       kind=text/inbound + kind=text/outbound.
+8. FINAL VALIDATION
+   8.1 required_inputs:
+   8.1.1 /worker-wb/src/routes/ui-send.ts
+   8.1.2 /job_site/browser_chat_route_contract.txt
+   8.2 validation_check_1: /ui/send is sole browser chat path — no other route handles browser text send.
+   8.3 validation_check_2: No placeholder echo logic; generateAssistantReply returns real assistant reply.
+   8.4 validation_check_3: Route has zero dependency on transcription/voice provider env vars.
+   8.5 outputs:
+   8.5.1 completion_status
+   8.6 completion_status: COMPLETE on PASS
 
 9. FOREMAN OUTPUT FORM
    9.1 job_id:
@@ -152,17 +144,22 @@ form_name: BROWSER INPUT TEST + FAILURE ISOLATION — EXEC-AI-STAGE4-UIFIX-002A
     10.8 push_required:
 
 11. WORKER RESULT FORM
-    11.1 [EXEC-AI-STAGE4-UIFIX-002A | WORKER B | S3 | RESULT]
+    11.1 [EXEC-AI-STAGE4-UIFIX-002A | WORKER A | S3 | RESULT]
     11.2 status: PASS
     11.3 artifacts:
-    11.3.1 /worker-wb/test/browser-chat-route.test.ts — R16 contracts added (failure isolation)
-    11.3.2 /job_site/browser_chat_demo_checklist.txt — Section 7 added (failure isolation steps)
-    11.3.3 /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt — created as authoritative ref
-    11.4 summary: Added R16 failure-isolation tests to browser-chat-route.test.ts.
-         Two new test cases prove that a pre-injected transcription failure item in the
-         session store does not prevent POST /ui/send from returning a non-placeholder
-         assistant reply. The checklist gains Section 7 for live operator verification.
-    11.5 issues:
+        /worker-wb/src/routes/ui-send.ts (verified, no changes required)
+        /job_site/browser_chat_route_contract.txt (updated with S3 PASS status)
+        /worker-wb/public/session-view.js (stale /telegram/webhook comments removed)
+        /job_site/build-sheet-EXEC-AI-STAGE4-UIFIX-002A.txt (created)
+    11.4 summary:
+        Selected /ui/send as the single canonical browser chat path (already locked in S2).
+        Removed two stale comments in worker-wb/public/session-view.js that incorrectly
+        referenced /telegram/webhook as the browser send path — conflicting with SEND_ENDPOINT
+        = '/ui/send'. Deployed file now matches canonical source exactly.
+        Confirmed ui-send.ts calls generateAssistantReply() (deterministic, rule-based) with
+        no dependency on voice capture or transcription providers. Route returns a real assistant
+        reply on every turn; no placeholder or echo behavior present.
+    11.5 issues: none
 
 FORM LAW BLOCK
 L1. stage numbering must use S1, S2, S3 format only
