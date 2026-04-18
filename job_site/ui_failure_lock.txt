@@ -1,0 +1,10 @@
+UI FAILURE LOCK
+job_id: EXEC-AI-STAGE4-UIFIX-002
+stage: S1
+locked_by: WORKER A
+
+locked_failures:
+1. deployed UI does not match intended Stage 4 control surface
+2. browser voice is not testable from UI
+3. browser chat route behavior is inconsistent
+4. calendar remains unconfigured or unusable from UI

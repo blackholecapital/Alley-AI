@@ -1,0 +1,24 @@
+UI DEPLOY ROOT
+job_id: EXEC-AI-STAGE4-UIFIX-002
+stage: S2
+produced_by: WORKER A
+
+deploy_root: /worker-wb
+wrangler_config: /worker-wb/wrangler.jsonc
+static_assets_directory: ./public          (absolute: /worker-wb/public)
+worker_main: src/index.ts
+worker_name: ali-ai
+compatibility_date: 2025-04-01
+
+ui_entry_point: /worker-wb/public/index.html
+ui_entry_served_at: /
+
+previous_state: /worker-wb/public/index.html was 110-line stale shell
+                referencing external /css/style.css and /js/app.js.
+                Calendar panel, voice capture SM, and session polling
+                were absent from the deployed asset.
+
+corrected_state: /worker-wb/public/index.html is the 639-line Stage 4 shell
+                 with all controls present: status bar, transcript/response panes,
+                 voice footer (Talk / Stop & Send / Cancel), calendar drawer,
+                 and inline styles. JS modules are co-located in /worker-wb/public/.
