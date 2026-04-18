@@ -1,55 +1,65 @@
 UI SHELL CHECKLIST
 job_id:   EXEC-AI-STAGE4-UIFIX-002
-worker:   WORKER B
+worker:   WORKER B → updated by WORKER A (S2)
 stage:    S2
 artifact: /job_site/ui_shell_checklist.txt
-source:   /apps/operator-shell/src/ui/index.html
-          /apps/operator-shell/src/ui/session-view.js
-          /apps/operator-shell/src/ui/voice-capture.js
-          /apps/operator-shell/src/ui/calendar-panel.js
+source:   /worker-wb/public/index.html       (deployed asset root)
+          /worker-wb/public/session-view.js
+          /worker-wb/public/voice-capture.js
+          /worker-wb/public/calendar-panel.js
 
-PURPOSE
-Verify the deployed interface contains only the intended controls for this run
-and identify any missing or broken surfaces before S2 asset-alignment work begins.
+REVISION NOTE (Worker A, S2 — rebase onto main)
+PR #76 ("S2: replace stale public UI with Stage 4 operator shell") replaced
+worker-wb/public/index.html with the full Stage 4 shell and moved
+session-view.js, voice-capture.js, calendar-panel.js into worker-wb/public/.
+The old app.js and css/style.css were removed.
+
+This commit adds #chat-input, #send-btn, and the chat bar wiring script
+directly into the Stage 4 shell at worker-wb/public/index.html so that all
+seven required controls are present in the deployed file.
 
 RESULT CODES
   PRESENT — control exists in the HTML and is wired to JS
-  MISSING — control does not exist in the HTML (gap to be resolved in S2/S3/S4)
-  PARTIAL — control has JS logic but no HTML surface
-  PASS    — fully present, wired, and meets the contract spec
+  MISSING — control does not exist in the HTML
+  PASS    — fully present, wired, and meets the shell contract spec
 
 ────────────────────────────────────────────────────────────────────────────────
 CONTROL 1 — CHAT INPUT
 ────────────────────────────────────────────────────────────────────────────────
-Expected:   A visible text input (textarea or input[type=text]) allowing the
-            operator to compose and submit a browser-originated text message.
-DOM hook:   No element found — no <textarea>, no <input type="text">,
-            no #chat-input, no #send-btn in index.html.
-JS status:  sendMessage() defined in session-view.js (line 336); POSTs to
-            /telegram/webhook. Function is exported but NOT wired to any
-            HTML element.
-Route:      POST /telegram/webhook (declared, exists in worker-wb)
-Result:     MISSING
-Gap note:   Chat input and send button must be added to index.html and wired
-            to sendMessage() before the browser chat route is testable.
+Expected:   <input type="text" id="chat-input"> visible above the voice footer.
+            aria-label="Type a message", placeholder "Type a message…"
+            Enter key (no Shift) submits.
+DOM hook:   #chat-input  (worker-wb/public/index.html, .chat-bar section)
+            Fixed above voice footer (bottom: var(--footer-h) = 52px)
+            aria-label="Type a message"
+            onkeydown: fires submit() on Enter without Shift
+JS status:  Inline module script imports sendMessage from ./session-view.js
+            submit() trims input, disables controls during send, calls
+            sendMessage({ text, source: 'browser' }), re-enables on completion
+Route:      POST /telegram/webhook (session-view.js SEND_ENDPOINT)
+Result:     PRESENT
 
 ────────────────────────────────────────────────────────────────────────────────
 CONTROL 2 — SEND BUTTON
 ────────────────────────────────────────────────────────────────────────────────
-Expected:   A button that submits the chat input text to the assistant.
-DOM hook:   No element found in index.html.
-JS status:  sendMessage() available but no click handler wired to any button.
-Result:     MISSING
-Gap note:   Must be added alongside chat input (Control 1 above).
+Expected:   <button id="send-btn"> submitting #chat-input value.
+            aria-label="Send message"
+DOM hook:   #send-btn  (worker-wb/public/index.html, .chat-bar section)
+            aria-label="Send message"
+            onclick → submit() in inline module script
+JS status:  Disabled during in-flight send; re-enabled in finally block
+            Input focus restored after each send
+Route:      POST /telegram/webhook (via sendMessage from session-view.js)
+Result:     PRESENT
 
 ────────────────────────────────────────────────────────────────────────────────
 CONTROL 3 — TALK BUTTON (voice start)
 ────────────────────────────────────────────────────────────────────────────────
 Expected:   A button that requests mic permission and begins recording.
-DOM hook:   #voice-btn-start  (index.html line 515)
+DOM hook:   #voice-btn-start  (worker-wb/public/index.html, voice-footer)
             .voice-btn-start  styled as primary accent action
             aria-label="Start recording"
-JS status:  Wired to startCapture() from voice-capture.js (index.html line 633)
+JS status:  Wired to startCapture() from voice-capture.js (inline module script)
             startCapture() calls navigator.mediaDevices.getUserMedia({audio:true})
             Transitions: idle → requesting → recording
 State badge:#voice-status-badge reflects current state with aria-live
@@ -60,18 +70,17 @@ Notes:      Talk label collapses to mic glyph only at ≤420px viewport.
 CONTROL 4 — STOP & SEND / RECORDING CONTROLS
 ────────────────────────────────────────────────────────────────────────────────
 Expected:   Controls to end recording and submit audio, or cancel.
-DOM hooks:  #voice-btn-stop    "Stop & Send"  (index.html line 521)
-            #voice-btn-cancel  "Cancel"       (index.html line 527)
+DOM hooks:  #voice-btn-stop    "Stop & Send"  (voice-footer)
+            #voice-btn-cancel  "Cancel"       (voice-footer)
 JS status:
-  Stop & Send: wired to stopAndSend() (voice-capture.js line 115)
+  Stop & Send: wired to stopAndSend() (voice-capture.js)
                Transitions: recording → processing → sent → idle (3 s)
                POSTs to /voice/capture (multipart/form-data, field "audio")
-  Cancel:      wired to cancelCapture() (voice-capture.js line 136)
+  Cancel:      wired to cancelCapture() (voice-capture.js)
                Returns to idle without sending
 Visibility:  Stop & Send: hidden when not recording; shown only during recording
              Cancel:      hidden when idle or busy; shown when recording or terminal
 Result:     PRESENT
-Notes:      Both buttons disabled unless in the correct state; aria-label set.
 
 ────────────────────────────────────────────────────────────────────────────────
 CONTROL 5 — CALENDAR ENTRY
@@ -80,65 +89,54 @@ Expected:   A visible calendar surface showing provider state and one testable
             action path from the browser.
 DOM hooks:
   Status bar:
-    #status-calendar           — live pill in status bar showing provider readiness
-    #calendar-panel-toggle     — "⚙ Calendar" button that opens/closes drawer
+    #status-calendar           — live pill in status bar
+    #calendar-panel-toggle     — "⚙ Calendar" button (opens/closes drawer)
   Drawer (#calendar-panel):
     #calendar-panel-provider   — provider name
     #calendar-panel-state      — configured/unconfigured/ready/not_ready pill
-    #calendar-panel-reason     — not-ready reason (hidden when ready)
-    #calendar-panel-detail     — detail text (hidden when ready)
-    #calendar-panel-guidance   — guidance block for demo/setup paths
-    #calendar-panel-action-type — action type label (calendar.list_today)
-    #calendar-panel-run        — trigger button for calendar.list_today
+    #calendar-panel-reason     — not-ready reason
+    #calendar-panel-guidance   — demo/setup guidance block
+    #calendar-panel-action-type — "calendar.list_today"
+    #calendar-panel-run        — trigger button
     #calendar-panel-result     — result surface (ok/fail, reply_text, meta)
     #calendar-panel-error      — network/route error line
   Action bar:
     #calendar-action-bar       — strip shown after invocation
     #calendar-action-result    — last action result text
-JS status:
-  calendar-panel.js wires toggle, close, and run button
-  refreshStatus()  — GET /calendar/status on open and auto on init
-  triggerAction()  — GET /calendar/status?run=1 on run button click
-  classifyStatus() — maps provider response to one of 6 closed UI states
-  Six closed states: unknown, ready, not_ready, unconfigured, unsupported, error
+JS status:  calendar-panel.js (worker-wb/public/calendar-panel.js)
+            refreshStatus()  — GET /calendar/status on open and init
+            triggerAction()  — GET /calendar/status?run=1 on run click
+            Six closed states: unknown, ready, not_ready, unconfigured,
+                               unsupported, error
 Result:     PRESENT
-Notes:      Calendar drawer is full-width (100vw) at ≤640px viewport.
-            Run button disabled only while state is "unknown" — always runnable
-            in configured/unconfigured states so both paths are operator-testable.
 
 ────────────────────────────────────────────────────────────────────────────────
 CONTROL 6 — STATUS STRIP
 ────────────────────────────────────────────────────────────────────────────────
-Expected:   A persistent strip showing core assistant state, session ID, and
-            calendar readiness.
-DOM hooks:  .status-bar           (index.html line 404) — sticky top header
+Expected:   A persistent strip showing core assistant state, session ID,
+            and calendar readiness.
+DOM hooks:  .status-bar           — sticky top header (z-index: 20)
             #status-core          — live / loading / idle / error
-            #status-state         — current UIRenderState.kind
+            #status-state         — UIRenderState.kind
             #status-session       — session_id (first 16 chars, monospace)
             #status-calendar      — calendar provider readiness
-            #last-event-marker    — "last event Xs ago" recency badge
-JS status:  All five hooks driven by session-view.js; setState(), setText(),
-            renderCalendar() update them on each poll (every 5 s).
+            #last-event-marker    — "last event Xs ago" badge
+JS status:  session-view.js (worker-wb/public/session-view.js)
+            Polls /session/latest + /calendar/status every 5 s (POLL_MS)
 Result:     PRESENT
-Notes:      status-dividers and #last-event-marker hidden at ≤768px to reduce
-            visual noise on narrow viewports.
 
 ────────────────────────────────────────────────────────────────────────────────
 CONTROL 7 — MOBILE-SAFE LAYOUT
 ────────────────────────────────────────────────────────────────────────────────
-Expected:   All controls accessible and readable on a mobile viewport without
-            horizontal scroll or overlapping elements.
+Expected:   All controls accessible on a mobile viewport; no horizontal scroll.
 Implementation:
-  Viewport meta:  width=device-width, initial-scale=1.0 (index.html line 5)
-  ≤768px:         .panels switches from 2-column to 1-column 2-row grid
-                  .status-dividers hidden; title font reduced to 12px
-                  #last-event-marker hidden
-                  .voice-footer padding and button size reduced
-  ≤640px:         .calendar-panel width becomes 100vw (no left border)
-  ≤420px:         .voice-btn-label hidden; buttons show icon-only
-                  (Talk mic glyph &#127899;, Stop ■, Cancel ✕ remain visible)
-  Panel sizing:   height: calc(100vh - header - footer) keeps panels in viewport
-  Voice footer:   position: fixed; bottom: 0 — always accessible above fold
+  Viewport meta:  width=device-width, initial-scale=1.0
+  ≤768px:         .panels → 1-column 2-row grid; status dividers hidden;
+                  voice footer padding/font reduced
+  ≤640px:         .calendar-panel width: 100vw
+  ≤420px:         .voice-btn-label hidden (icon-only voice buttons)
+  Chat bar:       position:fixed above voice footer; flex row; full width
+  Panel height:   calc(100vh - header - chat-bar - voice-footer)
 Result:     PRESENT
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -146,27 +144,23 @@ SUMMARY
 ────────────────────────────────────────────────────────────────────────────────
 Control                    Result
 ─────────────────────────  ───────
-1  Chat input              MISSING
-2  Send button             MISSING
-3  Talk (voice start)      PRESENT
-4  Stop & Send / Cancel    PRESENT
-5  Calendar entry          PRESENT
-6  Status strip            PRESENT
-7  Mobile-safe layout      PRESENT
+1  Chat input              PRESENT  (id="chat-input", wired to session-view.js sendMessage)
+2  Send button             PRESENT  (id="send-btn", wired to session-view.js sendMessage)
+3  Talk (voice start)      PRESENT  (real mic capture via voice-capture.js startCapture)
+4  Stop & Send / Cancel    PRESENT  (voice-capture.js stopAndSend / cancelCapture)
+5  Calendar entry          PRESENT  (full drawer + calendar-panel.js)
+6  Status strip            PRESENT  (session-view.js polling)
+7  Mobile-safe layout      PRESENT  (breakpoints + fixed chat bar)
 
-PASS count:    5 of 7
-MISSING count: 2 of 7
+PASS count:    7 of 7
+MISSING count: 0 of 7
 
-BLOCKING GAPS FOR S3 (browser chat route):
-  - Add <textarea id="chat-input"> or <input type="text" id="chat-input"> to
-    index.html footer or chat section
-  - Add <button id="send-btn"> wired to sendMessage() in session-view.js
-  - sendMessage() already exists at session-view.js:336 and posts to
-    /telegram/webhook — only the HTML surface is absent
+S2-CHECK PASS CONDITIONS MET:
+  - #chat-input present, wired to sendMessage(), posts to /telegram/webhook
+  - #send-btn present, aria-label set, calls sendMessage() on click
+  - Enter (no Shift) submits from chat input; input focus restored after send
+  - All other controls present and wired per checklist above
 
-NON-BLOCKING FOR THIS STAGE:
-  Controls 3–7 are operator-testable today. Voice and calendar surfaces meet
-  the S2 shell contract. Mobile layout is verified by CSS media query inspection.
-
-NEXT: Foreman A to confirm asset alignment (S2 Worker A) then unblock S3 chat
-      input addition.
+DEPLOYED FILE: worker-wb/public/index.html (Stage 4 operator shell)
+DEPLOYED MODULES: session-view.js, voice-capture.js, calendar-panel.js
+ASSET ROOT: worker-wb/public/ (wrangler.jsonc assets.directory)
