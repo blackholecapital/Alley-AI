@@ -6,6 +6,17 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-04-01",
 
+  // ── Custom-domain route ───────────────────────────────────────────
+  // Live target: ali-ai.xyz-labs.xyz (zone: xyz-labs.xyz)
+  // Ref: deploy_route_lock.txt — route mapping must be explicit before
+  // deployed UI validation is unblocked.
+  "routes": [
+    {
+      "pattern": "ali-ai.xyz-labs.xyz/*",
+      "zone_name": "xyz-labs.xyz"
+    }
+  ],
+
   // ── Public testing route ──────────────────────────────────────────
   // workers_dev = true exposes <name>.<account>.workers.dev which is
   // reachable without Cloudflare Access gates. Use this URL for direct

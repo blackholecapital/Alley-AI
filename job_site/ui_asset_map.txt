@@ -1,5 +1,5 @@
 UI ASSET MAP
-job_id: EXEC-AI-STAGE4-UIFIX-002
+job_id: EXEC-AI-STAGE4-UIFIX-002A
 stage: S2
 produced_by: WORKER A
 
@@ -30,3 +30,11 @@ WIRING NOTE
   All styles are inline. No external CSS or CDN dependencies.
   API calls target same-origin worker routes: /session/latest, /calendar/status,
   /voice/capture, /telegram/webhook.
+
+ROUTE MAPPING (EXEC-AI-STAGE4-UIFIX-002A — deploy_route_lock.txt)
+  live_target_domain:     ali-ai.xyz-labs.xyz
+  zone_name:              xyz-labs.xyz
+  wrangler_route_pattern: ali-ai.xyz-labs.xyz/*
+  wrangler_config_field:  routes[0].pattern / routes[0].zone_name
+  ui_validation_gate:     deployed UI validation is blocked until route mapping is explicit
+  status:                 LOCKED — route declared in wrangler.jsonc
