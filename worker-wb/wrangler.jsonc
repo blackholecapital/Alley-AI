@@ -90,9 +90,19 @@
   //     { "name": "SESSION_DO", "class_name": "SessionObject" }
   //   ]
   // },
-  // "migrations": [
-  //   { "tag": "v1", "new_classes": ["SessionObject"] }
-  // ],
+
+  // ── Durable Object migrations ─────────────────────────────────────
+  // An earlier deploy of the `ali-ai` Worker registered a `SessionObject`
+  // Durable Object class on Cloudflare's side. That class was never
+  // implemented in src/, so subsequent deploys fail with error 10064:
+  //   "New version of script does not export class 'SessionObject'
+  //    which is depended on by existing Durable Objects."
+  // Deleting the class drops any registered DOs and unblocks deploys.
+  // When a real SessionObject is implemented, add a `new_classes`
+  // migration under a new tag (e.g. "v2").
+  "migrations": [
+    { "tag": "v1", "deleted_classes": ["SessionObject"] }
+  ],
 
   "observability": {
     "enabled": true
