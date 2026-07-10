@@ -12,7 +12,7 @@
   // deployed UI validation is unblocked.
   "routes": [
     {
-      "pattern": "ali-ai.xyz-labs.xyz/*",
+      "pattern": "alley.xyz-labs.xyz/*",
       "zone_name": "xyz-labs.xyz"
     }
   ],
