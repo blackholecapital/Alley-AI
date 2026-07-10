@@ -23,6 +23,7 @@
   // runtime testing when custom-domain routes are behind Zero Trust.
   "workers_dev": true,
   "preview_urls": true,
+  "keep_vars": true,
 
   // Build — Wrangler bundles TypeScript natively; no separate build step needed.
   // If a custom build becomes necessary, uncomment:
@@ -107,6 +108,22 @@
   "migrations": [
     { "tag": "v2-delete-session-object", "deleted_classes": ["SessionObject"] }
   ],
+
+  "kv_namespaces": [
+    {
+      "binding": "TEMPLATE_STORE",
+      "id": "a5d486812cba493bb81b57b172d1e161"
+    }
+  ],
+
+  "queues": {
+    "producers": [
+      {
+        "binding": "TASK_QUEUE",
+        "queue": "eila-os-v2-tasks"
+      }
+    ]
+  },
 
   "observability": {
     "enabled": true
