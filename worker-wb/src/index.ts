@@ -4,6 +4,7 @@ import { handleHealth } from './routes/health';
 import { handleUiSend } from './routes/ui-send';
 import { handleCalendarStatus } from './routes/calendar-status';
 import { handleVoiceCapture } from './integrations/telegram/voice';
+import { demoSmsRoute } from './routes/demo-sms';
 import type { TelegramEnv } from './integrations/telegram/types';
 import type { TranscriptionEnv } from './providers/transcription/provider';
 import type { CalendarEnv } from './integrations/calendar/provider';
@@ -42,6 +43,8 @@ export default {
         response = await handleUiSend(request, logger);
       } else if (url.pathname === '/voice/capture') {
         response = await handleVoiceCapture(request, env, logger);
+      } else if (request.method === 'POST' && url.pathname === '/internal/demo/sms') {
+        response = await demoSmsRoute(request, env);
       } else {
         response = new Response(null, { status: 404 });
       }
