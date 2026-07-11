@@ -16,9 +16,22 @@ interface Env extends TelegramEnv, TranscriptionEnv, CalendarEnv {
   LOG_LEVEL?: string;
 }
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders,
+      });
+    }
     const correlationId = extractCorrelationId(request);
     const startedAt = Date.now();
 
@@ -55,7 +68,7 @@ export default {
       response = new Response(
         JSON.stringify({
           ok: false,
-          error: { code: 'internal_error', message: 'unhandled error' },
+          error: { code: 'internal_error', message: err instanceof Error ? err.message : String(err) },
           correlation_id: correlationId,
         }),
         {
@@ -79,6 +92,12 @@ export default {
       return patched;
     }
 
-    return response;
+    const patched = new Response(response.body, response);
+
+    for (const [k,v] of Object.entries(corsHeaders)) {
+      patched.headers.set(k, v);
+    }
+
+    return patched;
   },
 };
