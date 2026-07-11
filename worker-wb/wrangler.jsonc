@@ -1,131 +1,121 @@
 {
-  // Cloudflare Worker configuration — worker-wb deployment root
-  // Ref: S5A.2, S5B.1 — Cloudflare Worker runtime patch + binding placeholders
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "alley-ai",
-  "main": "src/index.ts",
-  "compatibility_date": "2025-04-01",
-
-  // ── Custom-domain route ───────────────────────────────────────────
-  // Live target: ali-ai.xyz-labs.xyz (zone: xyz-labs.xyz)
-  // Ref: deploy_route_lock.txt — route mapping must be explicit before
-  // deployed UI validation is unblocked.
-  "routes": [
-    {
-      "pattern": "alley.xyz-labs.xyz/*",
-      "zone_name": "xyz-labs.xyz"
-    }
-  ],
-
-  // ── Public testing route ──────────────────────────────────────────
-  // workers_dev = true exposes <name>.<account>.workers.dev which is
-  // reachable without Cloudflare Access gates. Use this URL for direct
-  // runtime testing when custom-domain routes are behind Zero Trust.
-  "workers_dev": true,
-  "preview_urls": true,
-  "keep_vars": true,
-
-  // Build — Wrangler bundles TypeScript natively; no separate build step needed.
-  // If a custom build becomes necessary, uncomment:
-  // "build": { "command": "npm run build" },
-
-  // ── Static assets ─────────────────────────────────────────────────
-  "assets": {
-    "directory": "./public"
-  },
-
-  // ── Cloudflare Access / Zero Trust ────────────────────────────────
-  // If the Worker's custom-domain route is behind a Cloudflare Access
-  // Application, direct curl/fetch will redirect to the Access login.
-  // Options to unblock runtime testing:
-  //   1. Use the *.workers.dev URL (not gated by Access)
-  //   2. Create a "Bypass" policy for /health and /api/* paths
-  //      in Zero Trust → Access → Applications
-  //   3. Create a Service Token (Zero Trust → Access → Service Auth)
-  //      and pass CF-Access-Client-Id + CF-Access-Client-Secret headers
-
-  // ── vars: plain-text runtime configuration ────────────────────────
-  // These are NOT secrets. Secrets go in .dev.vars (local) or
-  // `wrangler secret put` (production). See .dev.vars.example.
-  "vars": {
-    "ENVIRONMENT": "development",
-    "WORKER_VERSION": "0.1.0",
-    "LOG_LEVEL": "info",
-    "PROXY_BACKEND_URL": "http://localhost:5000"
-  },
-
-  // ── KV Namespaces ─────────────────────────────────────────────────
-  // Session state, interaction log cache, feature flags.
-  // To provision: wrangler kv namespace create CHASSIS_KV
-  //
-  // "kv_namespaces": [
-  //   { "binding": "CHASSIS_KV", "id": "<kv-namespace-id>" }
-  // ],
-
-  // ── D1 Databases ──────────────────────────────────────────────────
-  // Structured data: calendar events, contacts, audit trail.
-  // To provision: wrangler d1 create ali-ai-chassis
-  //
-  // "d1_databases": [
-  //   {
-  //     "binding": "CHASSIS_DB",
-  //     "database_name": "ali-ai-chassis",
-  //     "database_id": "<d1-database-id>"
-  //   }
-  // ],
-
-  // ── R2 Buckets ────────────────────────────────────────────────────
-  // Binary / large-object storage: voice recordings, attachments, exports.
-  // To provision: wrangler r2 bucket create ali-ai-assets
-  //
-  // "r2_buckets": [
-  //   { "binding": "ASSETS_BUCKET", "bucket_name": "ali-ai-assets" }
-  // ],
-
-  // ── Durable Objects ───────────────────────────────────────────────
-  // Stateful singletons: per-user session, conversation coordinator.
-  // Requires a DO class exported from the Worker entrypoint.
-  //
-  // "durable_objects": {
-  //   "bindings": [
-  //     { "name": "SESSION_DO", "class_name": "SessionObject" }
-  //   ]
-  // },
-
-  // ── Durable Object migrations ─────────────────────────────────────
-  // An earlier deploy of the `ali-ai` Worker registered a `SessionObject`
-  // Durable Object class on Cloudflare's side (under migration tag "v1").
-  // That class was never implemented in src/, so subsequent deploys fail
-  // with error 10064:
-  //   "New version of script does not export class 'SessionObject'
-  //    which is depended on by existing Durable Objects."
-  //
-  // Migration tags are unique per script server-side: Cloudflare skips
-  // any tag it has already applied. The original "v1" (new_classes) is
-  // already registered, so the delete must run under a fresh tag.
-  // When a real SessionObject is implemented later, add another
-  // migration under a new tag (e.g. "v3").
-  "migrations": [
-    { "tag": "v2-delete-session-object", "deleted_classes": ["SessionObject"] }
-  ],
-
-  "kv_namespaces": [
-    {
-      "binding": "TEMPLATE_STORE",
-      "id": "a5d486812cba493bb81b57b172d1e161"
-    }
-  ],
-
-  "queues": {
-    "producers": [
-      {
-        "binding": "TASK_QUEUE",
-        "queue": "eila-os-v2-tasks"
-      }
-    ]
-  },
-
-  "observability": {
-    "enabled": true
-  }
+	// Cloudflare Worker configuration — worker-wb deployment root
+	// Ref: S5A.2, S5B.1 — Cloudflare Worker runtime patch + binding placeholders
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "alley-ai",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-04-01",
+	// ── Custom-domain route ───────────────────────────────────────────
+	// Live target: ali-ai.xyz-labs.xyz (zone: xyz-labs.xyz)
+	// Ref: deploy_route_lock.txt — route mapping must be explicit before
+	// deployed UI validation is unblocked.
+	// ── Public testing route ──────────────────────────────────────────
+	// workers_dev = true exposes <name>.<account>.workers.dev which is
+	// reachable without Cloudflare Access gates. Use this URL for direct
+	// runtime testing when custom-domain routes are behind Zero Trust.
+	"workers_dev": true,
+	"preview_urls": true,
+	"keep_vars": true,
+	// Build — Wrangler bundles TypeScript natively; no separate build step needed.
+	// If a custom build becomes necessary, uncomment:
+	// "build": { "command": "npm run build" },
+	// ── Static assets ─────────────────────────────────────────────────
+	"assets": {
+		"directory": "./public"
+	},
+	// ── Cloudflare Access / Zero Trust ────────────────────────────────
+	// If the Worker's custom-domain route is behind a Cloudflare Access
+	// Application, direct curl/fetch will redirect to the Access login.
+	// Options to unblock runtime testing:
+	//   1. Use the *.workers.dev URL (not gated by Access)
+	//   2. Create a "Bypass" policy for /health and /api/* paths
+	//      in Zero Trust → Access → Applications
+	//   3. Create a Service Token (Zero Trust → Access → Service Auth)
+	//      and pass CF-Access-Client-Id + CF-Access-Client-Secret headers
+	// ── vars: plain-text runtime configuration ────────────────────────
+	// These are NOT secrets. Secrets go in .dev.vars (local) or
+	// `wrangler secret put` (production). See .dev.vars.example.
+	"vars": {
+		"ENVIRONMENT": "development",
+		"WORKER_VERSION": "0.1.0",
+		"LOG_LEVEL": "info",
+		"PROXY_BACKEND_URL": "http://localhost:5000"
+	},
+	// ── KV Namespaces ─────────────────────────────────────────────────
+	// Session state, interaction log cache, feature flags.
+	// To provision: wrangler kv namespace create CHASSIS_KV
+	//
+	// "kv_namespaces": [
+	//   { "binding": "CHASSIS_KV", "id": "<kv-namespace-id>" }
+	// ],
+	// ── D1 Databases ──────────────────────────────────────────────────
+	// Structured data: calendar events, contacts, audit trail.
+	// To provision: wrangler d1 create ali-ai-chassis
+	//
+	// "d1_databases": [
+	//   {
+	//     "binding": "CHASSIS_DB",
+	//     "database_name": "ali-ai-chassis",
+	//     "database_id": "<d1-database-id>"
+	//   }
+	// ],
+	// ── R2 Buckets ────────────────────────────────────────────────────
+	// Binary / large-object storage: voice recordings, attachments, exports.
+	// To provision: wrangler r2 bucket create ali-ai-assets
+	//
+	// "r2_buckets": [
+	//   { "binding": "ASSETS_BUCKET", "bucket_name": "ali-ai-assets" }
+	// ],
+	// ── Durable Objects ───────────────────────────────────────────────
+	// Stateful singletons: per-user session, conversation coordinator.
+	// Requires a DO class exported from the Worker entrypoint.
+	//
+	// "durable_objects": {
+	//   "bindings": [
+	//     { "name": "SESSION_DO", "class_name": "SessionObject" }
+	//   ]
+	// },
+	// ── Durable Object migrations ─────────────────────────────────────
+	// An earlier deploy of the `ali-ai` Worker registered a `SessionObject`
+	// Durable Object class on Cloudflare's side (under migration tag "v1").
+	// That class was never implemented in src/, so subsequent deploys fail
+	// with error 10064:
+	//   "New version of script does not export class 'SessionObject'
+	//    which is depended on by existing Durable Objects."
+	//
+	// Migration tags are unique per script server-side: Cloudflare skips
+	// any tag it has already applied. The original "v1" (new_classes) is
+	// already registered, so the delete must run under a fresh tag.
+	// When a real SessionObject is implemented later, add another
+	// migration under a new tag (e.g. "v3").
+	"migrations": [
+		{
+			"tag": "v2-delete-session-object",
+			"deleted_classes": [
+				"SessionObject"
+			]
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "TEMPLATE_STORE",
+			"id": "a5d486812cba493bb81b57b172d1e161"
+		},
+		{
+			"binding": "DEMO_LEADS",
+			"id": "6b321fa09a4146af9bad9688c29b81b2",
+			"remote": true
+		}
+	],
+	"queues": {
+		"producers": [
+			{
+				"binding": "TASK_QUEUE",
+				"queue": "eila-os-v2-tasks"
+			}
+		]
+	},
+	"observability": {
+		"enabled": true
+	}
 }
