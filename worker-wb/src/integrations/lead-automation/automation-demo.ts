@@ -14,8 +14,20 @@ export async function handleAutomationDemoSms(request: Request, env: any) {
     email: typeof body["email"] === "string" ? body["email"] : "",
     phone: typeof body["phone"] === "string" ? body["phone"] : "",
     interest: typeof body["interest"] === "string" && body["interest"] ? body["interest"] : "AI Automation",
-    source: typeof body["source"] === "string" && body["source"] ? body["source"] : "Website Demo"
+    source: typeof body["source"] === "string" && body["source"] ? body["source"] : "Website Demo",
+    notes: typeof body["notes"] === "string" ? body["notes"] : "",
+    timestamp: typeof body["timestamp"] === "string" && body["timestamp"] ? body["timestamp"] : new Date().toISOString()
   };
+
+  if (!env.DEMO_LEADS) {
+    throw new Error("DEMO_LEADS KV binding is required");
+  }
+
+  await env.DEMO_LEADS.put(
+    `lead:${lead.leadId}`,
+    JSON.stringify(lead),
+    { expirationTtl: 86400 }
+  );
 
   const notifyTo = env.NOTIFY_CJ;
 
