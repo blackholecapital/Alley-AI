@@ -31,10 +31,47 @@ export async function demoLeadsRoute(env: AppEnv): Promise<Response> {
     String(b.timestamp || "").localeCompare(String(a.timestamp || ""))
   );
 
-  return new Response(JSON.stringify({ ok: true, items: leads }), {
-    headers: {
-      "content-type": "application/json",
-      "cache-control": "no-store",
-    },
-  });
+  const items = leads.map((lead) => ({
+    // Preserve everything already stored in KV
+    ...lead,
+
+    // Stable identifiers
+    id: String(lead.leadId ?? lead.id ?? ""),
+    leadId: String(lead.leadId ?? lead.id ?? ""),
+
+    // DealTile compatibility
+    stage: "New Lead",
+    status: "New Lead",
+
+    // Display fields
+    title: String(lead.interest ?? lead.name ?? "New Lead"),
+    name: String(lead.name ?? ""),
+    contact_name: String(lead.name ?? ""),
+    company_name: String(lead.company ?? ""),
+    owner_name: String(lead.owner ?? ""),
+
+    email: String(lead.email ?? ""),
+    phone: String(lead.phone ?? ""),
+
+    // Numeric defaults
+    value: 0,
+    probability: 0,
+
+    // Flags
+    is_demo_lead: true,
+    lifecycle_stage: "prospect",
+  }));
+
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      items,
+    }),
+    {
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+      },
+    }
+  );
 }
