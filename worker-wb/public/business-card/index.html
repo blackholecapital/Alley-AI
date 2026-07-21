@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Business Card Scanner</title>
+<style>
+body{font-family:system-ui;margin:40px;max-width:900px;background:#111;color:#eee}
+h1{margin-bottom:20px}
+button{padding:12px 20px;margin:10px 0}
+input,textarea{width:100%;padding:10px;margin:6px 0}
+img{max-width:100%;margin:20px 0;border-radius:8px}
+#result{display:none}
+</style>
+</head>
+<body>
+
+<h1>Business Card Scanner</h1>
+
+<input id="image" type="file" accept="image/*" capture="environment">
+
+<img id="preview" style="display:none">
+
+<p>
+<button id="scan">Scan Business Card</button>
+</p>
+
+<div id="status"></div>
+
+<div id="result">
+<input id="name" placeholder="Name">
+<input id="company" placeholder="Company">
+<input id="title" placeholder="Title">
+<input id="email" placeholder="Email">
+<input id="phone" placeholder="Phone">
+<input id="website" placeholder="Website">
+<textarea id="address" placeholder="Address"></textarea>
+</div>
+
+<script>
+const image=document.getElementById("image");
+const preview=document.getElementById("preview");
+
+image.onchange=()=>{
+ const f=image.files[0];
+ if(!f)return;
+ preview.src=URL.createObjectURL(f);
+ preview.style.display="block";
+};
+
+document.getElementById("scan").onclick=async()=>{
+ const f=image.files[0];
+ if(!f){alert("Choose an image");return;}
+
+ document.getElementById("status").textContent="Scanning...";
+
+ const fd=new FormData();
+ fd.append("image",f);
+
+ const r=await fetch("/api/vision/business-card",{
+   method:"POST",
+   body:fd
+ });
+
+ if(!r.ok){
+   document.getElementById("status").textContent="Scan failed";
+   return;
+ }
+
+ const j=await r.json();
+
+ document.getElementById("status").textContent="Done";
+
+ document.getElementById("result").style.display="block";
+
+ document.getElementById("name").value=j.name||"";
+ document.getElementById("company").value=j.company||"";
+ document.getElementById("title").value=j.title||"";
+ document.getElementById("email").value=j.email||"";
+ document.getElementById("phone").value=j.phone||"";
+ document.getElementById("website").value=j.website||"";
+ document.getElementById("address").value=j.address||"";
+};
+</script>
+
+</body>
+</html>
