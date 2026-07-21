@@ -6,6 +6,7 @@ import { handleCalendarStatus } from "./routes/calendar-status";
 import { handleVoiceCapture } from "./integrations/telegram/voice";
 import { demoSmsRoute } from "./routes/demo-sms";
 import { demoLeadsRoute } from "./routes/demo-leads";
+import { demoBusinessCardRoute } from "./routes/demo-business-card";
 import type { Logger } from "./lib/logging";
 import type { AppEnv } from "./types/env";
 
@@ -44,6 +45,10 @@ export async function routeRequest(
 
     case "GET /internal/demo/leads":
       return demoLeadsRoute(env);
+
+    case "POST /internal/demo/business-card":
+      return demoBusinessCardRoute(request, env);
+
 
     default:
       return new Response(
