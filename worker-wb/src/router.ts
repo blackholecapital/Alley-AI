@@ -51,6 +51,7 @@ export async function routeRequest(
       return demoBusinessCardRoute(request, env);
 
 case "POST /vision/business-card":
+case "POST /api/vision/business-card":
     return visionBusinessCardRoute(request, env);
 
     default:
