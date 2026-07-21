@@ -26,7 +26,7 @@ export async function visionBusinessCardRoute(
   proxyForm.append("image", image, "business-card.jpg");
 
   const response = await fetch(
-    "http://127.0.0.1:8081/vision/business-card",
+    "https://vision.xyz-labs.xyz/vision/business-card",
     {
       method: "POST",
       body: proxyForm
