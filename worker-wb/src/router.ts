@@ -9,6 +9,7 @@ import { demoLeadsRoute } from "./routes/demo-leads";
 import { demoBusinessCardRoute } from "./routes/demo-business-card";
 import type { Logger } from "./lib/logging";
 import type { AppEnv } from "./types/env";
+import { visionBusinessCardRoute } from "./routes/vision-business-card";
 
 export async function routeRequest(
   request: Request,
@@ -49,6 +50,8 @@ export async function routeRequest(
     case "POST /internal/demo/business-card":
       return demoBusinessCardRoute(request, env);
 
+case "POST /vision/business-card":
+    return visionBusinessCardRoute(request, env);
 
     default:
       return new Response(
