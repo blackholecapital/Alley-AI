@@ -568,3 +568,26 @@ margin-top:10px;
 
 }
 
+
+/* ---- Hero spacing adjustments ---- */
+
+.hero h1{
+    margin-bottom:8px;
+}
+
+.hero h2,
+.hero .subtitle{
+    margin-top:0;
+    margin-bottom:10px;
+}
+
+.hero strong{
+    display:block;
+    margin-top:6px;
+    margin-bottom:4px;
+}
+
+.hero p{
+    margin-top:0;
+}
+
