@@ -1,51 +1,187 @@
-const picker=document.getElementById("cardImage");
-const btn=document.getElementById("scanBtn");
-const img=document.getElementById("preview");
+let stream = null;
 
-btn.onclick=()=>picker.click();
+const video = document.getElementById("preview");
+const canvas = document.getElementById("captureCanvas");
 
-picker.onchange=async()=>{
+const startBtn = document.getElementById("startCamera");
+const captureBtn = document.getElementById("capture");
+const retakeBtn = document.getElementById("retake");
+const createLeadBtn = document.getElementById("createLead");
 
-const file=picker.files[0];
-if(!file)return;
+const spinner = document.getElementById("spinner");
+const raw = document.getElementById("raw");
 
-img.src=URL.createObjectURL(file);
-img.style.display="block";
+const fields = [
+    "name",
+    "company",
+    "title",
+    "email",
+    "phone",
+    "website",
+    "address"
+];
 
-const fd=new FormData();
-fd.append("image",file);
+function showSpinner(show) {
+    spinner.classList.toggle("hidden", !show);
+}
 
-const r=await fetch("/vision/business-card",{
-method:"POST",
-body:fd
-});
+async function startCamera() {
 
-const data=await r.json();
+    if (stream)
+        stream.getTracks().forEach(t => t.stop());
 
-Object.keys(data).forEach(k=>{
-const el=document.getElementById(k);
-if(el)el.value=data[k];
-});
+    stream = await navigator.mediaDevices.getUserMedia({
+
+        video: {
+            facingMode: "environment"
+        },
+
+        audio: false
+
+    });
+
+    video.srcObject = stream;
+
+    await video.play();
+
+    captureBtn.disabled = false;
+
+}
+
+startBtn.onclick = async () => {
+
+    try {
+
+        await startCamera();
+
+    } catch (err) {
+
+        alert("Unable to access camera.");
+
+        console.error(err);
+
+    }
 
 };
 
-document.getElementById("leadForm").onsubmit=async(e)=>{
+captureBtn.onclick = async () => {
 
-e.preventDefault();
+    showSpinner(true);
 
-const payload={};
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
 
-document.querySelectorAll("input").forEach(i=>{
-payload[i.id]=i.value;
-});
+    const ctx = canvas.getContext("2d");
 
-const r=await fetch("/internal/demo/business-card",{
-method:"POST",
-headers:{
-"Content-Type":"application/json"
-},
-body:JSON.stringify(payload)
-});
+    ctx.drawImage(video, 0, 0);
 
-alert("Lead Created");
+    canvas.toBlob(async blob => {
+
+        try {
+
+            const fd = new FormData();
+
+            fd.append(
+                "image",
+                blob,
+                "business-card.jpg"
+            );
+
+            const response = await fetch("/vision/business-card", {
+
+                method: "POST",
+                body: fd
+
+            });
+
+            if (!response.ok)
+                throw new Error("Vision API failed");
+
+            const data = await response.json();
+
+            raw.textContent = JSON.stringify(data, null, 2);
+
+            fields.forEach(id => {
+
+                const el = document.getElementById(id);
+
+                if (el)
+                    el.value = data[id] || "";
+
+            });
+
+        } catch (err) {
+
+            console.error(err);
+
+            alert("OCR failed.");
+
+        }
+
+        showSpinner(false);
+
+    }, "image/jpeg", 0.95);
+
 };
+
+retakeBtn.onclick = () => {
+
+    fields.forEach(id => {
+
+        const el = document.getElementById(id);
+
+        if (el)
+            el.value = "";
+
+    });
+
+    raw.textContent = "";
+
+};
+
+createLeadBtn.onclick = async () => {
+
+    const payload = {};
+
+    fields.forEach(id => {
+
+        payload[id] =
+            document.getElementById(id).value;
+
+    });
+
+    try {
+
+        const r = await fetch("/internal/demo/business-card", {
+
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify(payload)
+
+        });
+
+        if (!r.ok)
+            throw new Error();
+
+        alert("Lead Created");
+
+    } catch (err) {
+
+        console.error(err);
+
+        alert("Unable to create lead.");
+
+    }
+
+};
+
+window.addEventListener("beforeunload", () => {
+
+    if (stream)
+        stream.getTracks().forEach(t => t.stop());
+
+});

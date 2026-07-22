@@ -1,17 +1,11 @@
 const BUSINESS_CARD_PROMPT = `
-Extract every field from this business card.
+Describe every piece of text visible on this business card.
 
-Return ONLY valid JSON.
+Read everything exactly as it appears.
 
-{
-    "name":"",
-    "title":"",
-    "company":"",
-    "email":"",
-    "phone":"",
-    "website":"",
-    "address":""
-}
+Do not summarize.
+Do not format as JSON.
+Return plain text only.
 `;
 
 module.exports = {

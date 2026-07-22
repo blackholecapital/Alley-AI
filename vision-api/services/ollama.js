@@ -24,7 +24,15 @@ async function analyzeBusinessCard(buffer){
 
     const json = await response.json();
 
-    return parseResponse(json.response);
+console.log("\n========== OLLAMA RAW ==========");
+console.dir(json,{depth:null});
+console.log("========== OLLAMA RESPONSE ==========");
+console.log(json.response);
+console.log("====================================\n");
+
+return {
+    raw: json.response
+};
 }
 
 module.exports = {

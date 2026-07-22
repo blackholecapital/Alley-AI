@@ -1,45 +1,184 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Business Card Scanner</title>
+
+<title>Alley AI • Business Card Scanner</title>
 
 <link rel="stylesheet" href="business-card.css">
 </head>
 
 <body>
 
-<h2>Scan Business Card</h2>
+<div class="app">
 
-<button id="scanBtn">
-📷 Take Picture
+<header class="topbar">
+
+<div class="brand">
+<div class="logo">A</div>
+
+<div>
+<h1>Alley AI</h1>
+<span>Vision Business Card Scanner</span>
+</div>
+</div>
+
+<div class="status online">
+<span class="dot"></span>
+Vision API Online
+</div>
+
+</header>
+
+<div class="layout">
+
+<section class="camera-panel">
+
+<div class="camera-frame">
+
+<video
+id="preview"
+autoplay
+playsinline
+muted
+></video>
+
+<canvas
+id="captureCanvas"
+hidden
+></canvas>
+
+<div class="overlay">
+
+<div class="card-guide">
+
+<div class="corner tl"></div>
+<div class="corner tr"></div>
+<div class="corner bl"></div>
+<div class="corner br"></div>
+
+</div>
+
+</div>
+
+<div id="spinner" class="spinner hidden">
+
+<div class="loader"></div>
+
+<p>Scanning Business Card…</p>
+
+</div>
+
+</div>
+
+<div class="controls">
+
+<button id="startCamera" class="primary">
+
+📷 Start Camera
+
 </button>
 
-<input
-id="cardImage"
-type="file"
-accept="image/*"
-capture="environment"
-hidden>
+<button id="capture" disabled>
 
-<img id="preview">
+Capture
 
-<form id="leadForm">
+</button>
 
-<input id="first_name" placeholder="First Name">
-<input id="last_name" placeholder="Last Name">
-<input id="company" placeholder="Company">
-<input id="title" placeholder="Title">
-<input id="email" placeholder="Email">
-<input id="phone" placeholder="Phone">
-<input id="website" placeholder="Website">
+<button id="retake">
 
-<button type="submit">
+Retake
+
+</button>
+
+</div>
+
+</section>
+
+<aside class="results">
+
+<h2>Extracted Contact</h2>
+
+<div class="field">
+
+<label>Name</label>
+
+<input id="name">
+
+</div>
+
+<div class="field">
+
+<label>Company</label>
+
+<input id="company">
+
+</div>
+
+<div class="field">
+
+<label>Title</label>
+
+<input id="title">
+
+</div>
+
+<div class="field">
+
+<label>Email</label>
+
+<input id="email">
+
+</div>
+
+<div class="field">
+
+<label>Phone</label>
+
+<input id="phone">
+
+</div>
+
+<div class="field">
+
+<label>Website</label>
+
+<input id="website">
+
+</div>
+
+<div class="field">
+
+<label>Address</label>
+
+<textarea id="address"></textarea>
+
+</div>
+
+<details>
+
+<summary>Raw OCR Output</summary>
+
+<pre id="raw"></pre>
+
+</details>
+
+<div class="actions">
+
+<button id="createLead" class="success">
+
 Create Lead
+
 </button>
 
-</form>
+</div>
+
+</aside>
+
+</div>
+
+</div>
 
 <script src="business-card.js"></script>
 

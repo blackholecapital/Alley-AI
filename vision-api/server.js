@@ -2,6 +2,9 @@ const express = require("express");
 const multer = require("multer");
 
 const app = express();
+console.log("***** RUNNING ~/Alley-AI/vision-api/server.js *****");
+console.log("cwd:", process.cwd());
+console.log("__dirname:", __dirname);
 
 const upload = multer({
     storage:multer.memoryStorage()
