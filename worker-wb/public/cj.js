@@ -1,4 +1,4 @@
-const saveBtn = document.getElementById("saveContact");
+const buttons = document.querySelectorAll("#saveContact,#saveContactQuick");
 
 const vcard = `BEGIN:VCARD
 VERSION:3.0
@@ -18,28 +18,22 @@ URL:https://x.com/Mktmakerxyz
 NOTE:Telegram @sparkie8675309
 END:VCARD`;
 
-saveBtn.onclick = () => {
+function saveContact(){
 
-    const blob = new Blob(
-        [vcard],
-        { type: "text/vcard" }
-    );
-
+    const blob = new Blob([vcard],{type:"text/vcard"});
     const url = URL.createObjectURL(blob);
 
-    const a = document.createElement("a");
-
-    a.href = url;
-    a.download = "CJ-Capobianco.vcf";
+    const a=document.createElement("a");
+    a.href=url;
+    a.download="CJ-Capobianco.vcf";
 
     document.body.appendChild(a);
-
     a.click();
-
     a.remove();
 
     URL.revokeObjectURL(url);
+}
 
-};
+buttons.forEach(btn=>btn.onclick=saveContact);
 
 console.log("CJ Executive Page Loaded");
