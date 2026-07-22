@@ -4,13 +4,12 @@ const vcard = `BEGIN:VCARD
 VERSION:3.0
 N:Capobianco;CJ;;;
 FN:CJ Capobianco
-ORG:Blackhole Capital
-TITLE:Founder | AI Systems Architect
+ORG:XYZ Labs
+TITLE:AI Systems Architect
 TEL;TYPE=CELL:+1-617-901-6112
 EMAIL;TYPE=WORK:info@blackholecapital.xyz
 URL:https://blackholecapital.xyz
 URL:https://xyz-labs.xyz
-URL:https://github.com/blackholecapital
 URL:https://github.com/blackholecapital/Audits
 URL:https://git.xyz-labs.xyz/factory-admin/Audits
 URL:https://www.youtube.com/@xyz-Labs-xyz
