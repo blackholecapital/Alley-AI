@@ -537,3 +537,34 @@ transform:scale(1.05);
 
 }
 
+
+.hero p{
+
+margin:14px auto 22px auto;
+
+}
+
+.hero h2{
+
+margin-bottom:8px;
+
+}
+
+.hero h1{
+
+margin-bottom:8px;
+
+}
+
+.hero{
+
+padding-top:8px;
+
+}
+
+.primary-button{
+
+margin-top:10px;
+
+}
+
