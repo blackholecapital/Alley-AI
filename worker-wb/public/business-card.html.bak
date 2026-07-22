@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Business Card Scanner</title>
+
+<link rel="stylesheet" href="business-card.css">
+</head>
+
+<body>
+
+<h2>Scan Business Card</h2>
+
+<button id="scanBtn">
+📷 Take Picture
+</button>
+
+<input
+id="cardImage"
+type="file"
+accept="image/*"
+capture="environment"
+hidden>
+
+<img id="preview">
+
+<form id="leadForm">
+
+<input id="first_name" placeholder="First Name">
+<input id="last_name" placeholder="Last Name">
+<input id="company" placeholder="Company">
+<input id="title" placeholder="Title">
+<input id="email" placeholder="Email">
+<input id="phone" placeholder="Phone">
+<input id="website" placeholder="Website">
+
+<button type="submit">
+Create Lead
+</button>
+
+</form>
+
+<script src="business-card.js"></script>
+
+</body>
+</html>
